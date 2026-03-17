@@ -216,7 +216,16 @@ export default function Sidebar() {
           </button>
         ))}
       </div>
-      <div className="shrink-0 px-3 py-2 border-t border-[#1e1e24]">
+      <div className="shrink-0 px-3 py-2 border-t border-[#1e1e24] space-y-1">
+        <a
+          href="https://solanaagent.app"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-slate-500 hover:text-emerald-400 transition block"
+          title="Solana Agent website"
+        >
+          solanaagent.app
+        </a>
         <p className="text-xs text-slate-500 font-mono" title="App version">
           V {appVersion} - {versionDate}
         </p>
