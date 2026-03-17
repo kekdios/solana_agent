@@ -1,0 +1,1514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Solana Agent</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+    }
+    body {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      background: #0a1628;
+      color: #e2e8f0;
+      min-height: 100vh;
+      height: 100vh;
+      display: flex;
+      flex-direction: row;
+    }
+    #sidebar {
+      width: 240px;
+      min-width: 240px;
+      height: 100vh;
+      flex-shrink: 0;
+      background: #071018;
+      border-right: 1px solid #1e3a5f;
+      display: flex;
+      flex-direction: column;
+      padding: 0.75rem 0;
+      transition: width 0.2s ease, min-width 0.2s ease;
+      overflow: hidden;
+    }
+    #sidebar.collapsed {
+      width: 56px;
+      min-width: 56px;
+    }
+    #sidebar.collapsed .nav-label,
+    #sidebar.collapsed #sidebar-title-text,
+    #sidebar.collapsed #sidebar-expand-label { display: none; }
+    #sidebar-header {
+      padding: 0 0.75rem 0.75rem;
+      border-bottom: 1px solid #1e3a5f;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      min-height: 2.25rem;
+      flex-shrink: 0;
+    }
+    #sidebar-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      overflow: hidden;
+    }
+    #sidebar-title .nav-icon { font-size: 1rem; }
+    #sidebar-toggle {
+      display: none;
+      background: none;
+      border: none;
+      color: #94a3b8;
+      cursor: pointer;
+      padding: 0.35rem;
+      font-size: 1.1rem;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    #sidebar-toggle:hover { color: #e2e8f0; }
+    #sidebar-expand-btn {
+      background: none;
+      border: none;
+      color: #94a3b8;
+      cursor: pointer;
+      padding: 0.35rem;
+      font-size: 1rem;
+      line-height: 1;
+      flex-shrink: 0;
+      border-radius: 0.35rem;
+    }
+    #sidebar-expand-btn:hover { color: #e2e8f0; background: #1e3a5f; }
+    #sidebar.collapsed #sidebar-expand-btn { margin: 0 auto; }
+    #sidebar-nav {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      flex: 1;
+    }
+    #sidebar-nav .nav-item {
+      font: inherit;
+      font-size: 0.8rem;
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      margin: 0 0.4rem;
+      border: none;
+      border-radius: 0.35rem;
+      background: transparent;
+      color: #94a3b8;
+      cursor: pointer;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      min-height: 2.25rem;
+    }
+    #sidebar-nav .nav-item:hover {
+      background: #1e3a5f;
+      color: #e2e8f0;
+    }
+    #sidebar-nav .nav-item .nav-icon {
+      font-size: 1.15rem;
+      flex-shrink: 0;
+      width: 1.4rem;
+      text-align: center;
+    }
+    #sidebar.collapsed #sidebar-nav .nav-item {
+      justify-content: center;
+      padding-left: 0.5rem;
+      padding-right: 0.5rem;
+      margin: 0 0.35rem;
+    }
+    #main {
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #chat-header {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 1rem;
+      background: #071018;
+      border-bottom: 1px solid #1e3a5f;
+      min-height: 2.75rem;
+    }
+    #chat-header img {
+      height: 2rem;
+      width: auto;
+      display: block;
+      border-radius: 0.35rem;
+    }
+    #chat-header .token-usage {
+      font-size: 0.75rem;
+      color: #94a3b8;
+    }
+    #chat-header .token-usage strong { color: #e2e8f0; }
+    #messages {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .msg {
+      font-size: 0.75rem;
+      max-width: 85%;
+      padding: 0.75rem 1rem;
+      border-radius: 0.5rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.45;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: #238636;
+      color: #fff;
+    }
+    .msg.assistant {
+      align-self: flex-start;
+      background: #1e3a5f;
+      border: 1px solid #2d4a6f;
+      white-space: normal;
+    }
+    .msg.assistant > :first-child { margin-top: 0; }
+    .msg.assistant > :last-child { margin-bottom: 0; }
+    .msg.assistant p { margin: 0.5rem 0; }
+    .msg .msg-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-bottom: 0.35rem;
+      padding: 0;
+      background: none;
+      border: none;
+      min-height: auto;
+    }
+    .msg .msg-header .msg-author { font-weight: 600; color: #94a3b8; }
+    .msg-body {
+      overflow-y: auto;
+      max-height: min(70vh, 28rem);
+      transition: max-height 0.25s ease;
+    }
+    .msg-body.collapsed {
+      max-height: 10rem;
+      overflow: hidden;
+      mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+    }
+    .msg.long-message .msg-body { padding: 0; }
+    .msg.long-message .msg-body > :first-child { margin-top: 0; }
+    .toggle-btn {
+      background: #334155;
+      border: none;
+      color: #7dd3fc;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.65rem;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .toggle-btn:hover { background: #475569; }
+    .table-wrapper {
+      overflow-x: auto;
+      margin: 0.5rem 0;
+      border-radius: 6px;
+      border: 1px solid #2d4a6f;
+    }
+    .table-wrapper table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.7rem;
+    }
+    .table-wrapper th, .table-wrapper td {
+      padding: 0.35rem 0.6rem;
+      border: 1px solid #2d4a6f;
+      text-align: left;
+    }
+    .table-wrapper th { background: #152238; color: #94a3b8; }
+    .table-wrapper td { background: #1e3a5f; }
+    .msg.error {
+      align-self: stretch;
+      background: #da3633;
+      color: #fff;
+    }
+    .msg.error .retry-btn {
+      margin-top: 0.5rem;
+      padding: 0.35rem 0.75rem;
+      font: inherit;
+      background: rgba(255,255,255,0.2);
+      border: 1px solid rgba(255,255,255,0.4);
+      border-radius: 0.35rem;
+      color: #fff;
+      cursor: pointer;
+    }
+    .msg.error .retry-btn:hover {
+      background: rgba(255,255,255,0.3);
+    }
+    .msg { position: relative; padding-right: 2rem; }
+    .msg-copy {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      width: 1.5rem;
+      height: 1.5rem;
+      padding: 0;
+      border: none;
+      border-radius: 0.35rem;
+      background: rgba(255,255,255,0.15);
+      color: inherit;
+      cursor: pointer;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0.7;
+    }
+    .msg-copy:hover { opacity: 1; background: rgba(255,255,255,0.25); }
+    .msg.user .msg-copy { background: rgba(255,255,255,0.2); }
+    .msg.user .msg-copy:hover { background: rgba(255,255,255,0.35); }
+    .msg-copy.copied {
+      background: rgba(74, 222, 128, 0.35);
+      color: #4ade80;
+      font-weight: 600;
+    }
+    .copy-debug-toast {
+      position: fixed;
+      bottom: 5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 0.5rem 0.75rem;
+      background: #1e293b;
+      border: 1px solid #475569;
+      border-radius: 0.5rem;
+      font-size: 0.75rem;
+      color: #94a3b8;
+      z-index: 1000;
+      max-width: 90%;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .code-block {
+      position: relative;
+      background: #1e293b;
+      color: #f8f8f2;
+      padding: 0.75rem 1rem;
+      margin: 0.5rem 0;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-family: "SF Mono", "Fira Code", "Source Code Pro", monospace;
+      font-size: 0.7rem;
+      line-height: 1.4;
+    }
+    .code-block code {
+      background: none;
+      color: inherit;
+      padding: 0;
+    }
+    .copy-btn {
+      position: absolute;
+      top: 0.35rem;
+      right: 0.35rem;
+      background: #334155;
+      border: none;
+      color: #e2e8f0;
+      padding: 0.25rem 0.45rem;
+      border-radius: 4px;
+      font-size: 0.65rem;
+      opacity: 0;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .code-block:hover .copy-btn { opacity: 1; }
+    .copy-btn:hover { background: #475569; }
+    .copy-btn.copied { opacity: 1; background: #15803d; color: #fff; }
+    .msg-markdown {
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    .msg-markdown h1, .msg-markdown h2, .msg-markdown h3, .msg-markdown h4 {
+      margin: 0.75rem 0 0.35rem;
+      font-weight: 600;
+      color: #e2e8f0;
+    }
+    .msg-markdown h1 { font-size: 1.1rem; }
+    .msg-markdown h2 { font-size: 1rem; }
+    .msg-markdown h3, .msg-markdown h4 { font-size: 0.9rem; }
+    .msg-markdown p { margin: 0.35rem 0; }
+    .msg-markdown ul, .msg-markdown ol {
+      margin: 0.35rem 0;
+      padding-left: 1.25rem;
+    }
+    .msg-markdown li { margin: 0.2rem 0; }
+    .msg-markdown strong { font-weight: 600; color: #f8fafc; }
+    .msg-markdown em { font-style: italic; }
+    .msg-markdown a { color: #7dd3fc; text-decoration: none; }
+    .msg-markdown a:hover { text-decoration: underline; }
+    .msg-markdown blockquote {
+      margin: 0.5rem 0;
+      padding-left: 1rem;
+      border-left: 3px solid #2d4a6f;
+      color: #94a3b8;
+    }
+    .msg-markdown hr { border: none; border-top: 1px solid #2d4a6f; margin: 0.75rem 0; }
+    .msg-markdown code:not([class]) {
+      background: #1e293b;
+      padding: 0.1rem 0.3rem;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+    .tool-result {
+      font-size: 0.75rem;
+      align-self: flex-start;
+      max-width: 85%;
+      padding: 0.75rem 1rem;
+      border-radius: 0.5rem;
+      background: #152238;
+      border: 1px solid #2d4a6f;
+      margin-top: 0.25rem;
+    }
+    .tool-result.browse a { color: #7dd3fc; }
+    .tool-result.browse .snippet { font-size: 0.9em; color: #94a3b8; margin-top: 0.35rem; }
+    .tool-result img { max-width: 100%; border-radius: 0.35rem; display: block; }
+    .tool-result .file-link { color: #7dd3fc; }
+    .tool-result .analysis-text { white-space: pre-wrap; margin-top: 0.35rem; }
+    .tool-result-summary { margin-right: 0.5rem; }
+    .tool-result-toggle {
+      font-size: 0.7rem; padding: 0.2rem 0.5rem; background: #1e3a5f; border: none; border-radius: 0.35rem;
+      color: #94a3b8; cursor: pointer;
+    }
+    .tool-result-toggle:hover { color: #e2e8f0; }
+    .tool-result-raw {
+      display: block; margin-top: 0.5rem; padding: 0.5rem; max-height: 12rem; overflow: auto;
+      font-size: 0.7rem; white-space: pre-wrap; word-break: break-all; background: #0f172a; border-radius: 0.35rem;
+    }
+    .session-list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+    .session-load-btn {
+      font: inherit; color: #7dd3fc; background: transparent; border: none; cursor: pointer;
+      padding: 0.2rem 0; text-align: left; text-decoration: underline;
+    }
+    .session-load-btn:hover { color: #bae6fd; }
+    #form {
+      display: flex;
+      gap: 0.5rem;
+      padding: 1rem;
+      border-top: 1px solid #1e3a5f;
+    }
+    #input {
+      font-size: 0.75rem;
+      flex: 1;
+      min-height: 6rem;
+      max-height: 12rem;
+      padding: 0.6rem 1rem;
+      font: inherit;
+      resize: vertical;
+      background: #152238;
+      border: 1px solid #2d4a6f;
+      border-radius: 0.5rem;
+      color: #e2e8f0;
+    }
+    #input:focus {
+      outline: none;
+      border-color: #7dd3fc;
+    }
+    #send {
+      font-size: 0.75rem;
+      padding: 0.6rem 1.2rem;
+      font: inherit;
+      background: #238636;
+      border: none;
+      border-radius: 0.5rem;
+      color: #fff;
+      cursor: pointer;
+    }
+    #send:hover { background: #2ea043; }
+    #send:disabled { opacity: 0.5; cursor: not-allowed; }
+    .thinking-indicator {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 0.75rem 1rem;
+      margin: 0.5rem 0;
+    }
+    .thinking-indicator img {
+      width: 24px;
+      height: 24px;
+      object-fit: contain;
+      animation: thinking-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes thinking-pulse {
+      0%, 100% { opacity: 0.7; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.05); }
+    }
+    #attach {
+      font-size: 0.75rem;
+      padding: 0.6rem 0.75rem;
+      font: inherit;
+      background: #334155;
+      border: 1px solid #2d4a6f;
+      border-radius: 0.5rem;
+      color: #e2e8f0;
+      cursor: pointer;
+    }
+    #attach:hover { background: #475569; }
+    #file-input { display: none; }
+    #menu-open { display: none; }
+    @media (max-width: 640px) {
+      #sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        z-index: 100;
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+      }
+      #sidebar.open {
+        transform: translateX(0);
+        width: 240px !important;
+        min-width: 240px !important;
+      }
+      #sidebar.open .nav-label,
+      #sidebar.open #sidebar-title-text,
+      #sidebar.open #sidebar-expand-label { display: inline !important; }
+      #sidebar.open #sidebar-nav .nav-item { justify-content: flex-start; }
+      #sidebar-toggle { display: block !important; }
+      #main-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.4);
+        z-index: 99;
+      }
+      #main-overlay.visible { display: block; }
+      #menu-open {
+        display: flex;
+        position: fixed;
+        top: 0.5rem;
+        left: 0.5rem;
+        z-index: 98;
+        background: #152238;
+        border: 1px solid #2d4a6f;
+        color: #e2e8f0;
+        padding: 0.4rem 0.6rem;
+        border-radius: 0.35rem;
+        font-size: 1rem;
+        cursor: pointer;
+        align-items: center;
+        justify-content: center;
+      }
+      #menu-open:hover { background: #1e3a5f; }
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+  <aside id="sidebar" class="collapsed">
+    <div id="sidebar-header">
+      <span id="sidebar-title">
+        <span class="nav-icon" aria-hidden="true">◉</span>
+        <span id="sidebar-title-text">dllm</span>
+      </span>
+      <button type="button" id="sidebar-toggle" title="Toggle menu" aria-label="Toggle menu">☰</button>
+      <button type="button" id="sidebar-expand-btn" title="Expand sidebar" aria-label="Expand sidebar">
+        <span class="nav-icon" id="sidebar-expand-arrow" aria-hidden="true">▶</span>
+        <span id="sidebar-expand-label">Collapse</span>
+      </button>
+    </div>
+    <nav id="sidebar-nav">
+      <button type="button" id="menu-new-chat" class="nav-item" title="New chat">
+        <span class="nav-icon" aria-hidden="true">✨</span>
+        <span class="nav-label">New chat</span>
+      </button>
+      <button type="button" id="menu-history" class="nav-item" title="History">
+        <span class="nav-icon" aria-hidden="true">📜</span>
+        <span class="nav-label">History</span>
+      </button>
+      <button type="button" id="menu-save" class="nav-item" title="Save session">
+        <span class="nav-icon" aria-hidden="true">💾</span>
+        <span class="nav-label">Save</span>
+      </button>
+      <button type="button" id="menu-restart" class="nav-item" title="Restart dllm server">
+        <span class="nav-icon" aria-hidden="true">🔄</span>
+        <span class="nav-label">Restart</span>
+      </button>
+      <button type="button" id="menu-help" class="nav-item" title="Help">
+        <span class="nav-icon" aria-hidden="true">❓</span>
+        <span class="nav-label">Help</span>
+      </button>
+    </nav>
+  </aside>
+  <div id="main-overlay" aria-hidden="true"></div>
+  <main id="main">
+  <header id="chat-header">
+    <img src="/build/yumi.png" alt="Yumi" />
+    <span id="token-usage" class="token-usage">Tokens: —</span>
+  </header>
+  <button type="button" id="menu-open" title="Open menu" aria-label="Open menu" style="display: none;">☰</button>
+  <div id="messages"></div>
+  <div id="copy-debug" class="copy-debug-toast" aria-live="polite" style="display: none;"></div>
+  <div id="thinking" class="thinking-indicator" aria-live="polite" style="display: none;">
+    <img src="/assets/loading-animation.gif" alt="" width="24" height="24" />
+  </div>
+  <form id="form">
+    <input type="file" id="file-input" />
+    <button type="button" id="attach" title="Attach file" aria-label="Attach file">+</button>
+    <textarea id="input" placeholder="Message... (Enter to send, Shift+Enter for new line)" autocomplete="off" rows="4"></textarea>
+    <button id="send" type="submit">Send</button>
+  </form>
+  </main>
+  <script>
+    const messagesEl = document.getElementById("messages");
+    const form = document.getElementById("form");
+    const input = document.getElementById("input");
+    const send = document.getElementById("send");
+    const thinkingEl = document.getElementById("thinking");
+    const fileInput = document.getElementById("file-input");
+    const attachBtn = document.getElementById("attach");
+    const sidebar = document.getElementById("sidebar");
+    const sidebarToggle = document.getElementById("sidebar-toggle");
+    const menuOpen = document.getElementById("menu-open");
+    const mainOverlay = document.getElementById("main-overlay");
+    const menuNewChat = document.getElementById("menu-new-chat");
+    const menuHistory = document.getElementById("menu-history");
+    const menuSave = document.getElementById("menu-save");
+    const menuRestart = document.getElementById("menu-restart");
+    const menuHelp = document.getElementById("menu-help");
+    const sidebarExpandBtn = document.getElementById("sidebar-expand-btn");
+    const sidebarExpandArrow = document.getElementById("sidebar-expand-arrow");
+
+    const messages = [];
+    /** Full message content for copy when message has no server id (e.g. just sent). Key = div.dataset.msgClientKey. */
+    const msgContentMap = new Map();
+    let conversationId = null;
+    const LONG_MSG_THRESHOLD = 800;
+    let sessionTokenTotal = 0;
+
+    function formatTokens(n) {
+      if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+      return String(n);
+    }
+    function updateTokenUsage(usage) {
+      const el = document.getElementById("token-usage");
+      if (!el) return;
+      if (!usage || (usage.prompt_tokens === 0 && usage.completion_tokens === 0 && usage.total_tokens === 0)) {
+        if (sessionTokenTotal === 0) el.textContent = "Tokens: —";
+        else el.innerHTML = `Tokens: <strong>Session ${formatTokens(sessionTokenTotal)}</strong>`;
+        return;
+      }
+      const total = Number(usage.total_tokens) || Number(usage.prompt_tokens) + Number(usage.completion_tokens);
+      sessionTokenTotal += total;
+      el.innerHTML = `Tokens: <strong>${formatTokens(usage.prompt_tokens)}</strong> in / <strong>${formatTokens(usage.completion_tokens)}</strong> out (${formatTokens(total)} total) · Session <strong>${formatTokens(sessionTokenTotal)}</strong>`;
+    }
+
+    const SLASH_HELP = `Slash commands:
+• /save – Save the current session with an automatic timestamp.
+• /history – Show saved conversations and let you load a previous one.
+• /help – Show this help text.`;
+    const PAGE_SIZE = 20;
+    let oldestId = null;
+    let hasMore = false;
+    let loadingMore = false;
+    let useHistoryApi = false;
+
+    function parseMessageContent(text) {
+      const parts = [];
+      const re = /```(\w*)\n?([\s\S]*?)```/g;
+      let lastEnd = 0;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        if (m.index > lastEnd) {
+          parseTextAndTables(text.slice(lastEnd, m.index), parts);
+        }
+        parts.push({ type: "code", lang: m[1] || "text", value: m[2].replace(/\n$/, "") });
+        lastEnd = m.index + m[0].length;
+      }
+      if (lastEnd < text.length) parseTextAndTables(text.slice(lastEnd), parts);
+      return parts.length ? parts : [{ type: "text", value: text }];
+    }
+
+    function parseTextAndTables(text, out) {
+      const lines = text.split(/\n/);
+      let i = 0;
+      const tableRowRe = /^\|.+\|$/;
+      while (i < lines.length) {
+        if (tableRowRe.test(lines[i])) {
+          const tableRows = [];
+          while (i < lines.length && tableRowRe.test(lines[i])) {
+            const cells = lines[i].split(/\|/).slice(1, -1).map((c) => c.trim());
+            if (cells.some(Boolean)) tableRows.push(cells);
+            i++;
+          }
+          const sep = tableRows.findIndex((r) => r.every((c) => /^[-:\s]+$/.test(c.trim())));
+          const header = sep >= 0 ? tableRows[0] : (tableRows.length ? tableRows[0] : []);
+          const body = sep >= 0 ? tableRows.slice(sep + 1) : tableRows.slice(1);
+          if (header.length) out.push({ type: "table", header, body });
+        } else {
+          const start = i;
+          while (i < lines.length && !tableRowRe.test(lines[i])) i++;
+          const value = lines.slice(start, i).join("\n").trim();
+          if (value) out.push({ type: "text", value });
+        }
+      }
+    }
+
+    function renderMarkdownSafe(text) {
+      if (typeof marked === "undefined") return escapeHtml(text);
+      const raw = marked.parse(text, { gfm: true });
+      return raw
+        .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+        .replace(/\s+on\w+="[^"]*"/gi, "")
+        .replace(/<a /g, "<a target=\"_blank\" rel=\"noopener\" ");
+    }
+    function buildMessageBody(parts) {
+      const fragment = document.createDocumentFragment();
+      parts.forEach((part) => {
+        if (part.type === "text") {
+          const trimmed = part.value.trim();
+          if (trimmed) {
+            const wrap = document.createElement("div");
+            wrap.className = "msg-markdown";
+            wrap.innerHTML = renderMarkdownSafe(trimmed);
+            fragment.appendChild(wrap);
+          }
+        } else if (part.type === "code") {
+          const pre = document.createElement("pre");
+          pre.className = "code-block";
+          const code = document.createElement("code");
+          code.className = part.lang ? "language-" + part.lang : "";
+          code.textContent = part.value;
+          pre.appendChild(code);
+          const copyBtn = document.createElement("button");
+          copyBtn.type = "button";
+          copyBtn.className = "copy-btn";
+          copyBtn.textContent = "Copy";
+          copyBtn.onclick = () => {
+            navigator.clipboard.writeText(part.value).then(() => {
+              copyBtn.textContent = "Copied!";
+              copyBtn.classList.add("copied");
+              setTimeout(() => { copyBtn.textContent = "Copy"; copyBtn.classList.remove("copied"); }, 1500);
+            });
+          };
+          pre.appendChild(copyBtn);
+          fragment.appendChild(pre);
+        } else if (part.type === "table") {
+          const wrap = document.createElement("div");
+          wrap.className = "table-wrapper";
+          const table = document.createElement("table");
+          const thead = document.createElement("thead");
+          thead.innerHTML = "<tr>" + part.header.map((h) => "<th>" + escapeHtml(h) + "</th>").join("") + "</tr>";
+          table.appendChild(thead);
+          const tbody = document.createElement("tbody");
+          part.body.forEach((row) => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = row.map((c) => "<td>" + escapeHtml(c) + "</td>").join("");
+            tbody.appendChild(tr);
+          });
+          table.appendChild(tbody);
+          wrap.appendChild(table);
+          fragment.appendChild(wrap);
+        }
+      });
+      return fragment;
+    }
+
+    function looksLikeToolArgs(content) {
+      if (typeof content !== "string" || content.length > 500) return false;
+      const t = content.trim();
+      return (t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"));
+    }
+    function getMessageText(container) {
+      const clone = container.cloneNode(true);
+      clone.querySelector(".msg-copy")?.remove();
+      return (clone.textContent || clone.innerText || "").trim();
+    }
+    function makeCopyBtn(container) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "msg-copy";
+      btn.title = "Copy message";
+      btn.setAttribute("aria-label", "Copy message");
+      btn.textContent = "⎘";
+      btn.onclick = async () => {
+        const debug = { messageId: container.dataset.messageId, clientKey: container.dataset.msgClientKey, source: "", textLength: 0, error: null };
+        let textToCopy = "";
+        const messageId = container.dataset.messageId;
+        const clientKey = container.dataset.msgClientKey;
+        if (messageId) {
+          try {
+            const url = `${location.origin}/api/messages/${encodeURIComponent(messageId)}`;
+            const res = await fetch(url);
+            debug.fetchStatus = res.status;
+            debug.fetchOk = res.ok;
+            if (res.ok) {
+              const data = await res.json();
+              textToCopy = (data.content ?? "").trim();
+              if (textToCopy) debug.source = "api";
+            }
+          } catch (e) {
+            debug.error = "fetch: " + (e && e.message);
+          }
+          if (!textToCopy) {
+            const fromMap = msgContentMap.get("db-" + messageId) ?? "";
+            textToCopy = fromMap.trim();
+            if (textToCopy) debug.source = "map(db-" + messageId + ")";
+          }
+        }
+        if (!textToCopy && clientKey) {
+          const fromMap = msgContentMap.get(clientKey) ?? "";
+          textToCopy = fromMap.trim();
+          if (textToCopy) debug.source = "map(clientKey)";
+        }
+        if (!textToCopy) {
+          textToCopy = getMessageText(container);
+          if (textToCopy) debug.source = "DOM";
+        }
+        debug.textLength = textToCopy ? textToCopy.length : 0;
+        function showCopyDebug() {
+          const line = !textToCopy
+            ? "Copy: no content | id=" + (messageId || "-") + " key=" + (clientKey ? "yes" : "no") + (debug.error ? " " + debug.error : "")
+            : "Copy: " + (debug.copied ? "OK" : "failed") + " " + debug.textLength + " chars (source: " + (debug.source || "?") + ")" + (debug.error ? " " + debug.error : "");
+          console.log("[dllm copy]", debug);
+          const el = document.getElementById("copy-debug");
+          if (el) {
+            el.textContent = line;
+            el.style.display = "block";
+            clearTimeout(el._copyDebugTimer);
+            el._copyDebugTimer = setTimeout(() => { el.style.display = "none"; }, 4500);
+          }
+        }
+        if (!textToCopy) {
+          btn.title = "Nothing to copy";
+          showCopyDebug();
+          return;
+        }
+        async function doCopy(text) {
+          if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+            await navigator.clipboard.writeText(text);
+            return true;
+          }
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.setAttribute("readonly", "");
+          ta.style.position = "fixed";
+          ta.style.left = "-9999px";
+          document.body.appendChild(ta);
+          ta.select();
+          ta.setSelectionRange(0, text.length);
+          let ok = false;
+          try {
+            ok = document.execCommand("copy");
+          } finally {
+            document.body.removeChild(ta);
+          }
+          return ok;
+        }
+        try {
+          const ok = await doCopy(textToCopy);
+          debug.copied = !!ok;
+          showCopyDebug();
+          if (ok) {
+            btn.textContent = "Copied!";
+            btn.title = "Copied to clipboard";
+            btn.classList.add("copied");
+            setTimeout(() => {
+              btn.textContent = "⎘";
+              btn.title = "Copy message";
+              btn.classList.remove("copied");
+            }, 2000);
+          } else {
+            btn.title = "Copy failed";
+          }
+        } catch (e) {
+          debug.copied = false;
+          debug.error = (debug.error || "") + " clipboard: " + (e && e.message);
+          showCopyDebug();
+          btn.title = "Copy failed";
+        }
+      };
+      return btn;
+    }
+    function addMsg(role, content, isError = false, messageId = null) {
+      const div = document.createElement("div");
+      div.className = `msg ${isError ? "error" : role}`;
+      if (role === "assistant" && !isError && looksLikeToolArgs(content)) {
+        content = "I ran the requested tools. See the results above.";
+      }
+      if (role === "assistant" && !isError) {
+        const parts = parseMessageContent(content);
+        const isLong = content.length >= LONG_MSG_THRESHOLD;
+        if (isLong) {
+          div.classList.add("long-message");
+          const header = document.createElement("div");
+          header.className = "msg-header";
+          header.innerHTML = '<span class="msg-author">Assistant</span>';
+          const toggleBtn = document.createElement("button");
+          toggleBtn.type = "button";
+          toggleBtn.className = "toggle-btn";
+          toggleBtn.setAttribute("aria-expanded", "false");
+          toggleBtn.textContent = "Read more ▾";
+          const body = document.createElement("div");
+          body.className = "msg-body collapsed";
+          body.appendChild(buildMessageBody(parts));
+          toggleBtn.onclick = () => {
+            const collapsed = body.classList.toggle("collapsed");
+            toggleBtn.setAttribute("aria-expanded", String(!collapsed));
+            toggleBtn.textContent = collapsed ? "Read more ▾" : "Show less ▾";
+          };
+          header.appendChild(toggleBtn);
+          div.appendChild(header);
+          div.appendChild(body);
+        } else {
+          div.appendChild(buildMessageBody(parts));
+        }
+        if (!div.hasChildNodes()) div.textContent = content;
+      } else if (role === "user" && !isError) {
+        div.appendChild(buildMessageBody(parseMessageContent(content)));
+        if (!div.hasChildNodes()) div.textContent = content;
+      } else {
+        div.textContent = content;
+      }
+      if (!isError) {
+        if (messageId != null) {
+          div.dataset.messageId = String(messageId);
+          msgContentMap.set("db-" + messageId, content);
+        } else {
+          const clientKey = "c-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+          msgContentMap.set(clientKey, content);
+          div.dataset.msgClientKey = clientKey;
+        }
+        div.appendChild(makeCopyBtn(div));
+      }
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function prependMsg(role, content, messageId = null) {
+      if (role === "assistant" && looksLikeToolArgs(content)) content = "I ran the requested tools. See the results above.";
+      const div = document.createElement("div");
+      div.className = "msg " + role;
+      if (role === "assistant") {
+        const parts = parseMessageContent(content);
+        const isLong = content.length >= LONG_MSG_THRESHOLD;
+        if (isLong) {
+          div.classList.add("long-message");
+          const header = document.createElement("div");
+          header.className = "msg-header";
+          header.innerHTML = '<span class="msg-author">Assistant</span>';
+          const toggleBtn = document.createElement("button");
+          toggleBtn.type = "button";
+          toggleBtn.className = "toggle-btn";
+          toggleBtn.setAttribute("aria-expanded", "false");
+          toggleBtn.textContent = "Read more ▾";
+          const body = document.createElement("div");
+          body.className = "msg-body collapsed";
+          body.appendChild(buildMessageBody(parts));
+          toggleBtn.onclick = () => {
+            const collapsed = body.classList.toggle("collapsed");
+            toggleBtn.setAttribute("aria-expanded", String(!collapsed));
+            toggleBtn.textContent = collapsed ? "Read more ▾" : "Show less ▾";
+          };
+          header.appendChild(toggleBtn);
+          div.appendChild(header);
+          div.appendChild(body);
+        } else {
+          div.appendChild(buildMessageBody(parts));
+        }
+        if (!div.hasChildNodes()) div.textContent = content;
+      } else if (role === "user") {
+        div.appendChild(buildMessageBody(parseMessageContent(content)));
+        if (!div.hasChildNodes()) div.textContent = content;
+      } else {
+        div.textContent = content;
+      }
+      if (role === "user" || role === "assistant") {
+        if (messageId != null) {
+          div.dataset.messageId = String(messageId);
+          msgContentMap.set("db-" + messageId, content);
+        } else {
+          const clientKey = "c-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+          msgContentMap.set(clientKey, content);
+          div.dataset.msgClientKey = clientKey;
+        }
+        div.appendChild(makeCopyBtn(div));
+      }
+      messagesEl.insertBefore(div, messagesEl.firstChild);
+    }
+
+    function renderToolResult(tr) {
+      const wrap = document.createElement("div");
+      wrap.className = "tool-result " + (tr.tool || "");
+      const r = tr.result;
+      if (tr.tool === "browse" && r?.url) {
+        wrap.innerHTML = `<a href="${escapeAttr(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title || r.url)}</a>` +
+          (r.snippet ? `<div class="snippet">${escapeHtml(r.snippet)}</div>` : "");
+      } else if (tr.tool === "generate_image") {
+        if (r?.ok && r.url) {
+          const src = r.b64 ? `data:image/png;base64,${r.url}` : r.url;
+          wrap.innerHTML = `<img src="${escapeAttr(src)}" alt="${escapeAttr(r.prompt || "")}" />`;
+        } else {
+          wrap.textContent = r?.message || "Image not generated.";
+        }
+      } else if (tr.tool === "file_write" && r?.id) {
+        wrap.innerHTML = `Saved <a class="file-link" href="/api/files/${escapeAttr(r.id)}" download="${escapeAttr(r.filename || "file")}">${escapeHtml(r.filename || "file")}</a>`;
+      } else if (tr.tool === "file_list" && Array.isArray(r)) {
+        wrap.innerHTML = r.length ? "Files: " + r.map((f) =>
+          `<a class="file-link" href="/api/files/${escapeAttr(f.id)}" download="${escapeAttr(f.filename || "")}">${escapeHtml(f.filename || f.id)}</a>`
+        ).join(", ") : "No files.";
+      } else if (tr.tool === "analyze_image") {
+        if (r?.ok && r.analysis) {
+          wrap.innerHTML = `<strong>Image analysis (${escapeHtml(r.filename || "image")}):</strong><div class="analysis-text">${escapeHtml(r.analysis)}</div>`;
+        } else {
+          wrap.textContent = r?.message || "Vision not available or analysis failed.";
+        }
+      } else if (tr.tool === "doc_crawl" && typeof r === "object") {
+        if (r.ok) {
+          const line = `${r.count ?? 0} pages saved to ${escapeHtml(r.save_to || "workspace")}` + (r.errors?.length ? ` (${r.errors.length} skipped)` : "");
+          wrap.innerHTML = `<span class="tool-result-summary">doc_crawl: ${line}</span> <button type="button" class="tool-result-toggle" aria-expanded="false">Details</button><pre class="tool-result-raw" hidden></pre>`;
+          const pre = wrap.querySelector(".tool-result-raw");
+          pre.textContent = JSON.stringify(r, null, 2);
+          wrap.querySelector(".tool-result-toggle").onclick = function () {
+            const open = pre.hidden;
+            pre.hidden = !open;
+            this.setAttribute("aria-expanded", String(open));
+            this.textContent = open ? "Hide" : "Details";
+          };
+        } else {
+          wrap.textContent = r.error || JSON.stringify(r);
+        }
+      } else if (tr.tool === "read_docs_folder" && typeof r === "object") {
+        if (r.ok) {
+          const line = `Digest: ${r.files?.length ?? 0} files, ~${(r.total_chars ?? 0).toLocaleString()} chars` + (r.summary_path ? `; ${escapeHtml(r.summary_path)} written` : "");
+          wrap.innerHTML = `<span class="tool-result-summary">read_docs_folder: ${line}</span> <button type="button" class="tool-result-toggle" aria-expanded="false">Details</button><pre class="tool-result-raw" hidden></pre>`;
+          const pre = wrap.querySelector(".tool-result-raw");
+          pre.textContent = JSON.stringify(r, null, 2);
+          wrap.querySelector(".tool-result-toggle").onclick = function () {
+            const open = pre.hidden;
+            pre.hidden = !open;
+            this.setAttribute("aria-expanded", String(open));
+            this.textContent = open ? "Hide" : "Details";
+          };
+        } else {
+          wrap.textContent = r.error || JSON.stringify(r);
+        }
+      } else if (tr.tool === "conversation_search" && typeof r === "object" && r.ok) {
+        const list = r.conversations || [];
+        const count = r.count ?? list.length;
+        if (count === 0) {
+          wrap.innerHTML = "<span class=\"tool-result-summary\">No past conversations matched your search.</span>";
+        } else {
+          let html = `<span class="tool-result-summary"><strong>Found ${count} conversation${count !== 1 ? "s" : ""}</strong> matching your search.</span><ul class="conversation-search-list" style="margin: 0.5rem 0 0 1rem; padding-left: 1rem; font-size: 0.85em;">`;
+          list.forEach((c) => {
+            const id = c.conversation_id;
+            const date = c.created_at ? c.created_at.replace("T", " ").slice(0, 19) : "";
+            const excerpt = escapeHtml((c.excerpt || "").slice(0, 200)) + ((c.excerpt || "").length > 200 ? "…" : "");
+            html += `<li style="margin: 0.35rem 0;"><a href="?conversation=${id}" class="file-link">Conversation ${id}</a>${date ? ` (${date})` : ""}<br><span style="color: #94a3b8;">${excerpt}</span></li>`;
+          });
+          html += "</ul>";
+          wrap.innerHTML = html + " <button type=\"button\" class=\"tool-result-toggle\" aria-expanded=\"false\">Details</button><pre class=\"tool-result-raw\" hidden></pre>";
+          const pre = wrap.querySelector(".tool-result-raw");
+          pre.textContent = JSON.stringify(r, null, 2);
+          wrap.querySelector(".tool-result-toggle").onclick = function () {
+            const open = pre.hidden;
+            pre.hidden = !open;
+            this.setAttribute("aria-expanded", String(open));
+            this.textContent = open ? "Hide" : "Details";
+          };
+        }
+      } else {
+        wrap.textContent = typeof r === "object" ? (r.error || JSON.stringify(r)) : String(r);
+      }
+      messagesEl.appendChild(wrap);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+    function escapeAttr(s) { return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;"); }
+    function escapeHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+    function addErrorMsg(message, retryable, onRetry) {
+      const wrap = document.createElement("div");
+      wrap.className = "msg error";
+      wrap.textContent = message;
+      if (retryable && typeof onRetry === "function") {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "retry-btn";
+        btn.textContent = "Retry";
+        btn.onclick = () => {
+          wrap.remove();
+          onRetry();
+        };
+        wrap.appendChild(document.createElement("br"));
+        wrap.appendChild(btn);
+      }
+      messagesEl.appendChild(wrap);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    async function submitChat() {
+      send.disabled = true;
+      if (thinkingEl) thinkingEl.style.display = "flex";
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages, conversation_id: conversationId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        const isApiError = data && "error" in data && "code" in data;
+        if (!res.ok || isApiError) {
+          const msg = data.error || (res.status ? `Error ${res.status}` : "Request failed");
+          addErrorMsg(msg, data.retryable, submitChat);
+          return;
+        }
+        if (data.conversation_id != null) {
+          conversationId = data.conversation_id;
+          const sid = String(conversationId);
+          try { localStorage.setItem("dllm_conversation_id", sid); } catch (e) {}
+          const url = new URL(location.href);
+          url.searchParams.set("conversation", sid);
+          history.replaceState({}, "", url);
+        }
+        (data.tool_results || []).forEach((tr) => renderToolResult(tr));
+        if (data.usage) updateTokenUsage(data.usage);
+        const content = data.choices?.[0]?.message?.content ?? "(no response)";
+        messages.push({ role: "assistant", content });
+        addMsg("assistant", content);
+      } catch (err) {
+        addErrorMsg(err.message, true, submitChat);
+      } finally {
+        send.disabled = false;
+        if (thinkingEl) thinkingEl.style.display = "none";
+      }
+    }
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      const cmd = text.toLowerCase();
+      if (cmd === "/help") {
+        messages.push({ role: "user", content: text });
+        addMsg("user", text);
+        messages.push({ role: "assistant", content: SLASH_HELP });
+        addMsg("assistant", SLASH_HELP);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return;
+      }
+      if (cmd === "/save") {
+        messages.push({ role: "user", content: text });
+        addMsg("user", text);
+        send.disabled = true;
+        try {
+          const res = await fetch("/api/session/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(
+              conversationId != null
+                ? { conversation_id: conversationId }
+                : { messages: messages.filter((m) => m.role === "user" || m.role === "assistant") }
+            ),
+          });
+          const data = await res.json().catch(() => ({}));
+          const reply = data.name
+            ? `Saved as ${data.name}.`
+            : (data.error || "Save failed.");
+          messages.push({ role: "assistant", content: reply });
+          addMsg("assistant", reply);
+        } catch (err) {
+          addMsg("assistant", "Save failed: " + err.message);
+        }
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        send.disabled = false;
+        return;
+      }
+      if (cmd === "/history") {
+        messages.push({ role: "user", content: text });
+        addMsg("user", text);
+        send.disabled = true;
+        try {
+          const res = await fetch("/api/sessions");
+          const data = await res.json().catch(() => ({}));
+          const list = data.sessions || [];
+          if (list.length === 0) {
+            messages.push({ role: "assistant", content: "No saved sessions." });
+            addMsg("assistant", "No saved sessions.");
+          } else {
+            const wrap = document.createElement("div");
+            wrap.className = "msg assistant";
+            wrap.innerHTML = "<strong>Saved sessions (click to load):</strong>";
+            const ul = document.createElement("ul");
+            ul.className = "session-list";
+            list.forEach((s) => {
+              const li = document.createElement("li");
+              const btn = document.createElement("button");
+              btn.type = "button";
+              btn.className = "session-load-btn";
+              btn.textContent = s.name || s.id;
+              btn.onclick = async () => {
+                const r = await fetch("/api/sessions/" + encodeURIComponent(s.id));
+                if (!r.ok) return;
+                const d = await r.json();
+                const msgs = d.messages || [];
+                messages.length = 0;
+                msgs.forEach((m) => messages.push({ role: m.role, content: m.content }));
+                messagesEl.querySelectorAll(".msg, .tool-result").forEach((n) => n.remove());
+                messages.forEach((m) => addMsg(m.role, m.content));
+                conversationId = null;
+                oldestId = null;
+                hasMore = false;
+                useHistoryApi = false;
+                try { localStorage.removeItem("dllm_conversation_id"); } catch (e) {}
+                const url = new URL(location.href);
+                url.searchParams.delete("conversation");
+                history.replaceState({}, "", url);
+                scrollToBottom();
+              };
+              li.appendChild(btn);
+              ul.appendChild(li);
+            });
+            wrap.appendChild(ul);
+            messagesEl.appendChild(wrap);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+          }
+        } catch (err) {
+          addMsg("assistant", "Failed to list sessions: " + err.message);
+        }
+        send.disabled = false;
+        return;
+      }
+      messages.push({ role: "user", content: text });
+      addMsg("user", text);
+      await submitChat();
+    });
+
+    attachBtn.addEventListener("click", () => fileInput.click());
+
+    fileInput.addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      fileInput.value = "";
+      attachBtn.disabled = true;
+      try {
+        const base64 = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => {
+            const s = r.result;
+            const i = s.indexOf(",");
+            resolve(i >= 0 ? s.slice(i + 1) : s);
+          };
+          r.onerror = () => reject(new Error("Failed to read file"));
+          r.readAsDataURL(file);
+        });
+        const res = await fetch("/api/files", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: file.name, content: base64 }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          addErrorMsg(data.error || "Upload failed", false);
+          return;
+        }
+        const data = await res.json();
+        const msg = `I've attached ${file.name}. File ID: ${data.id}. You can use file_read to get the content or analyze_image to describe/OCR it.`;
+        messages.push({ role: "user", content: msg });
+        addMsg("user", msg);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      } catch (err) {
+        addErrorMsg(err.message, false);
+      } finally {
+        attachBtn.disabled = false;
+      }
+    });
+
+    async function loadMoreOlder() {
+      if (!hasMore || loadingMore || oldestId == null) return;
+      loadingMore = true;
+      const url = useHistoryApi
+        ? `/api/history?before_id=${encodeURIComponent(oldestId)}&limit=${PAGE_SIZE}`
+        : `/api/chat?conversation_id=${encodeURIComponent(conversationId)}&before_id=${encodeURIComponent(oldestId)}&limit=${PAGE_SIZE}`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+        const list = data.messages || [];
+        if (list.length) {
+          const oldScrollHeight = messagesEl.scrollHeight;
+          const oldScrollTop = messagesEl.scrollTop;
+          for (let i = list.length - 1; i >= 0; i--) {
+            const m = list[i];
+            messages.unshift({ id: m.id, role: m.role, content: m.content });
+            prependMsg(m.role, m.content, m.id);
+          }
+          messagesEl.scrollTop = oldScrollTop + (messagesEl.scrollHeight - oldScrollHeight);
+          oldestId = data.oldest_id ?? null;
+          hasMore = !!data.has_more;
+        } else {
+          hasMore = false;
+        }
+      } catch (e) {}
+      loadingMore = false;
+    }
+
+    function scrollToBottom() {
+      const run = () => { messagesEl.scrollTop = messagesEl.scrollHeight; };
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          run();
+          setTimeout(run, 50);
+          setTimeout(run, 200);
+        });
+      });
+    }
+
+    async function loadConversation() {
+      let cid = new URLSearchParams(location.search).get("conversation");
+      if (!cid) {
+        try { cid = localStorage.getItem("dllm_conversation_id"); } catch (e) {}
+      }
+      if (cid) {
+        try {
+          const res = await fetch("/api/chat?conversation_id=" + encodeURIComponent(cid) + "&limit=" + PAGE_SIZE);
+          if (!res.ok) return;
+          const data = await res.json();
+          const list = data.messages || [];
+          if (list.length) {
+            conversationId = Number(cid);
+            oldestId = data.oldest_id ?? null;
+            hasMore = !!data.has_more;
+            useHistoryApi = false;
+            list.forEach((m) => {
+              messages.push({ id: m.id, role: m.role, content: m.content });
+              addMsg(m.role, m.content, false, m.id);
+            });
+            scrollToBottom();
+            try { localStorage.setItem("dllm_conversation_id", String(cid)); } catch (e) {}
+            const url = new URL(location.href);
+            if (url.searchParams.get("conversation") !== cid) {
+              url.searchParams.set("conversation", String(cid));
+              history.replaceState({}, "", url);
+            }
+            return;
+          }
+        } catch (e) {}
+      }
+      try {
+        const res = await fetch("/api/history?limit=" + PAGE_SIZE);
+        if (!res.ok) return;
+        const data = await res.json();
+        const list = data.messages || [];
+        const latestId = data.latest_conversation_id;
+        if (list.length) {
+          conversationId = latestId != null ? Number(latestId) : null;
+          oldestId = data.oldest_id ?? null;
+          hasMore = !!data.has_more;
+          useHistoryApi = true;
+          list.forEach((m) => {
+            messages.push({ id: m.id, role: m.role, content: m.content });
+            addMsg(m.role, m.content, false, m.id);
+          });
+          scrollToBottom();
+          if (latestId != null) {
+            try { localStorage.setItem("dllm_conversation_id", String(latestId)); } catch (e) {}
+            const url = new URL(location.href);
+            url.searchParams.set("conversation", String(latestId));
+            history.replaceState({}, "", url);
+          }
+        }
+      } catch (e) {}
+    }
+
+    messagesEl.addEventListener("scroll", () => {
+      if (messagesEl.scrollTop < 80) loadMoreOlder();
+    });
+
+    function closeSidebar() {
+      sidebar.classList.remove("open");
+      mainOverlay.classList.remove("visible");
+    }
+    function openSidebar() {
+      sidebar.classList.add("open");
+      mainOverlay.classList.add("visible");
+    }
+    function toggleSidebar() {
+      if (sidebar.classList.toggle("open")) mainOverlay.classList.add("visible");
+      else mainOverlay.classList.remove("visible");
+    }
+    sidebarToggle.addEventListener("click", toggleSidebar);
+    if (menuOpen) menuOpen.addEventListener("click", openSidebar);
+    mainOverlay.addEventListener("click", closeSidebar);
+
+    function setSidebarCollapsed(collapsed) {
+      if (collapsed) {
+        sidebar.classList.add("collapsed");
+        if (sidebarExpandArrow) sidebarExpandArrow.textContent = "▶";
+        if (sidebarExpandBtn) {
+          sidebarExpandBtn.setAttribute("aria-label", "Expand sidebar");
+          sidebarExpandBtn.title = "Expand sidebar";
+        }
+      } else {
+        sidebar.classList.remove("collapsed");
+        if (sidebarExpandArrow) sidebarExpandArrow.textContent = "◀";
+        if (sidebarExpandBtn) {
+          sidebarExpandBtn.setAttribute("aria-label", "Collapse sidebar");
+          sidebarExpandBtn.title = "Collapse sidebar";
+        }
+      }
+      try { localStorage.setItem("dllm_sidebar_collapsed", collapsed ? "1" : "0"); } catch (e) {}
+    }
+    function toggleSidebarCollapsed() {
+      const collapsed = !sidebar.classList.contains("collapsed");
+      setSidebarCollapsed(collapsed);
+    }
+    if (sidebarExpandBtn) {
+      sidebarExpandBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleSidebarCollapsed(); });
+    }
+    (function initSidebarCollapsed() {
+      try {
+        const stored = localStorage.getItem("dllm_sidebar_collapsed");
+        if (stored === "0") setSidebarCollapsed(false);
+      } catch (e) {}
+    })();
+
+    function doNewChat() {
+      messages.length = 0;
+      conversationId = null;
+      oldestId = null;
+      hasMore = false;
+      useHistoryApi = false;
+      sessionTokenTotal = 0;
+      updateTokenUsage(null);
+      messagesEl.querySelectorAll(".msg, .tool-result").forEach((n) => n.remove());
+      try { localStorage.removeItem("dllm_conversation_id"); } catch (e) {}
+      const url = new URL(location.href);
+      url.searchParams.delete("conversation");
+      history.replaceState({}, "", url);
+      closeSidebar();
+    }
+    async function doSave() {
+      closeSidebar();
+      send.disabled = true;
+      try {
+        const res = await fetch("/api/session/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            conversationId != null
+              ? { conversation_id: conversationId }
+              : { messages: messages.filter((m) => m.role === "user" || m.role === "assistant") }
+          ),
+        });
+        const data = await res.json().catch(() => ({}));
+        const reply = data.name ? `Saved as ${data.name}.` : (data.error || "Save failed.");
+        messages.push({ role: "assistant", content: reply });
+        addMsg("assistant", reply);
+      } catch (err) {
+        addMsg("assistant", "Save failed: " + err.message);
+      }
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      send.disabled = false;
+    }
+    async function doRestart() {
+      closeSidebar();
+      send.disabled = true;
+      addMsg("assistant", "Restarting dllm server…");
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      try {
+        await fetch("/api/restart", { method: "POST" });
+        setTimeout(() => location.reload(), 2500);
+      } catch (err) {
+        addMsg("assistant", "Restart request failed: " + err.message);
+        send.disabled = false;
+      }
+    }
+    function doHelp() {
+      messages.push({ role: "user", content: "/help" });
+      addMsg("user", "/help");
+      messages.push({ role: "assistant", content: SLASH_HELP });
+      addMsg("assistant", SLASH_HELP);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      closeSidebar();
+    }
+    async function doHistory() {
+      messages.push({ role: "user", content: "/history" });
+      addMsg("user", "/history");
+      closeSidebar();
+      try {
+        const res = await fetch("/api/sessions");
+        const data = await res.json().catch(() => ({}));
+        const list = data.sessions || [];
+        if (list.length === 0) {
+          messages.push({ role: "assistant", content: "No saved sessions." });
+          addMsg("assistant", "No saved sessions.");
+        } else {
+          const wrap = document.createElement("div");
+          wrap.className = "msg assistant";
+          wrap.innerHTML = "<strong>Saved sessions (click to load):</strong>";
+          const ul = document.createElement("ul");
+          ul.className = "session-list";
+          list.forEach((s) => {
+            const li = document.createElement("li");
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "session-load-btn";
+            btn.textContent = s.name || s.id;
+            btn.onclick = async () => {
+              const r = await fetch("/api/sessions/" + encodeURIComponent(s.id));
+              if (!r.ok) return;
+              const d = await r.json();
+              const msgs = d.messages || [];
+              messages.length = 0;
+              msgs.forEach((m) => messages.push({ role: m.role, content: m.content }));
+              messagesEl.querySelectorAll(".msg, .tool-result").forEach((n) => n.remove());
+              messages.forEach((m) => addMsg(m.role, m.content));
+              conversationId = null;
+              oldestId = null;
+              hasMore = false;
+              useHistoryApi = false;
+              try { localStorage.removeItem("dllm_conversation_id"); } catch (e) {}
+              const url = new URL(location.href);
+              url.searchParams.delete("conversation");
+              history.replaceState({}, "", url);
+              scrollToBottom();
+            };
+            li.appendChild(btn);
+            ul.appendChild(li);
+          });
+          wrap.appendChild(ul);
+          messagesEl.appendChild(wrap);
+        }
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      } catch (err) {
+        addMsg("assistant", "Failed to list sessions: " + err.message);
+      }
+    }
+    menuNewChat.addEventListener("click", doNewChat);
+    menuHistory.addEventListener("click", doHistory);
+    menuSave.addEventListener("click", doSave);
+    menuRestart.addEventListener("click", doRestart);
+    menuHelp.addEventListener("click", doHelp);
+
+    loadConversation();
+  </script>
+</body>
+</html>

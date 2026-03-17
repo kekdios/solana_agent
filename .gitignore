@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-renderer/
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Data and runtime (agent DB, sessions, uploaded files)
+dllm.db
+data/solagent.db
+workspace/doc.db
+data/solagent.db-journal
+data/.encryption-key
+data/files/
+data/sessions/
+data/memory/
+data/test-in-process/
+
+# Keep data directory structure (optional placeholder)
+!data/.gitkeep
+
+# macOS
+.DS_Store
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Electron / npm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.eslintcache
+
+# Optional: uncomment if you want to ignore the whole data folder
+# data/

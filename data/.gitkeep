@@ -1,0 +1,2 @@
+# solagent.db is created here when you run `node server.js` from the project root.
+# When you run the Electron app, the DB is in ~/Library/Application Support/Solana Agent/data/solagent.db instead.

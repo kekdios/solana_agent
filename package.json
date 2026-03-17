@@ -1,0 +1,92 @@
+{
+  "name": "solagent",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "electron-main.cjs",
+  "dependencies": {
+    "@drift-labs/sdk": "^2.155.0",
+    "@solana/spl-token": "^0.4.13",
+    "@solana/web3.js": "^1.98.4",
+    "better-sqlite3": "^11.6.0",
+    "bs58": "^6.0.0",
+    "electron-updater": "^6.8.3",
+    "js-yaml": "^4.1.0",
+    "node-cron": "^3.0.3",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
+    "zustand": "^5.0.11"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "autoprefixer": "^10.4.27",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.2.1",
+    "vite": "^7.3.1"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev:renderer": "vite",
+    "build:renderer": "vite build",
+    "electron": "env -u ELECTRON_RUN_AS_NODE electron .",
+    "build": "npm run build:renderer && electron-builder --mac --dir && (open dist/mac-arm64/Solana\\ Agent.app 2>/dev/null || true)",
+    "test": "node -e \"console.log('OK')\"",
+    "test:in-process-server": "node scripts/test-in-process-server.js"
+  },
+  "build": {
+    "appId": "com.solana.agent.trader",
+    "productName": "Solana Agent",
+    "mac": {
+      "category": "public.app-category.finance",
+      "target": "dir",
+      "icon": "build/icon_dock.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "yourusername",
+      "repo": "solana-agent"
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "asar": false,
+    "directories": {
+      "buildResources": "build"
+    },
+    "files": [
+      "electron-main.cjs",
+      "index.html",
+      "package.json",
+      "server.js",
+      "db.js",
+      "sessionStore.js",
+      "config",
+      "tools",
+      "workspace",
+      "data",
+      "dist-renderer",
+      "src",
+      "node_modules"
+    ]
+  }
+}

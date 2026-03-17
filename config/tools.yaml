@@ -1,0 +1,282 @@
+# config/tools.yaml
+# ------------------------------------------------------------------
+# Single source of truth for tools the LLM can invoke.
+# Edit this file to add/remove tools or change descriptions; parameter
+# schemas stay in server.js (PARAM_SCHEMAS) for OpenAI compatibility.
+# ------------------------------------------------------------------
+
+tools:
+  - name: browse
+    description: |
+      Fetch a web page or search the web. You HAVE this tool—use it whenever the user
+      asks to visit a site, check a URL, or look something up (e.g. "visit agentchainlab.com",
+      "review the MCP on that site"). Pass a full URL to fetch that page directly, or a
+      search query; DuckDuckGo is used for search, then the first result is fetched.
+    module: ./tools/browser.js
+    handler: browse
+    enabled: true
+    options:
+      timeoutMs: 8000
+      maxSnippetChars: 500
+
+  - name: fetch_url
+    description: |
+      Make HTTP GET or POST requests to external APIs. You HAVE this tool—use it when the user
+      asks to onboard, call an API, or do something that requires POST (e.g. AgentChain onboard).
+      For AgentChainLab onboarding: method POST, url https://app.agentchainlab.com/api/agent/onboard,
+      body "{}" or "{\"agent_name\":\"...\"}". For GET (e.g. balance): method GET, url with query params.
+      Only HTTPS URLs are allowed. Do NOT say you cannot make HTTP requests—call this tool.
+    module: ./tools/fetch.js
+    handler: fetchUrl
+    enabled: true
+
+  - name: doc_crawl
+    description: |
+      Crawl a documentation site and save all pages to the workspace. Fetches the base URL (e.g. https://docs.bebop.xyz/bebop),
+      parses the page for same-section links, fetches each linked page, strips HTML to text, and saves to workspace under
+      save_to (e.g. docs/bebop) as .md files plus per-page metadata (.json) and TOC.md. Use when the user wants to pull the full doc set for later analysis.
+      Optional save_to (workspace path prefix) and max_pages (default 30, max 100).
+    module: ./tools/doc-crawl.js
+    handler: docCrawl
+    enabled: true
+
+  - name: doc_index
+    description: |
+      Build or refresh the SQLite FTS index for a workspace docs folder (e.g. after doc_crawl). Pass root (workspace-relative path like docs/bebop).
+      Enables fast full-text search via doc_search. Run once per crawl or when docs change.
+    module: ./tools/doc-index.js
+    handler: docIndex
+    enabled: true
+
+  - name: doc_search
+    description: |
+      Full-text search over **indexed documentation** (crawled docs in workspace/docs/*, e.g. docs/bebop). Use when the user wants to find something *in the docs*. Pass query (FTS5 syntax) and optional limit (default 10). Returns path, title, snippet, url. NOT for "did we talk about X?" — use conversation_search for that.
+    module: ./tools/doc-search.js
+    handler: docSearch
+    enabled: true
+
+  - name: read_docs_folder
+    description: |
+      Read an entire docs folder (e.g. after doc_crawl). Returns all .md files as one digest with truncated per-file
+      chunks so context stays reasonable. Optionally writes SUMMARY.md in that folder listing each file with a one-line
+      preview—so when the user says "tell me more about X" you can workspace_read the path from the summary.
+      Pass path (e.g. docs/bebop). Optional max_per_file (default 2000), max_total (default 28000), write_summary (default true).
+    module: ./tools/read-docs-folder.js
+    handler: readDocsFolder
+    enabled: true
+
+  - name: file_write
+    description: Save a file (content and filename). Returns file id for later read or download.
+    module: ./tools/files.js
+    handler: fileWrite
+    enabled: true
+
+  - name: file_read
+    description: Read a file by id. Use after file_write or when user asks to open a file.
+    module: ./tools/files.js
+    handler: fileRead
+    enabled: true
+
+  - name: file_list
+    description: List saved files (id, filename, size).
+    module: ./tools/files.js
+    handler: fileList
+    enabled: true
+
+  - name: generate_image
+    description: Generate an image from a text prompt (diffusion). Use when the user asks to draw, create an image, or generate a picture.
+    module: ./tools/image.js
+    handler: generateImage
+    enabled: true
+    options:
+      defaultSize: "1024x1024"
+
+  - name: analyze_image
+    description: Analyse an uploaded image (describe it, OCR text, answer a question). Use when the user attaches an image and asks what it shows, or to extract text. Pass the file_id from the attachment message.
+    module: ./tools/vision.js
+    handler: analyzeImage
+    enabled: true
+
+  - name: heartbeat
+    description: Get a lightweight health-check payload (timestamp, status, memory, pid). Use when the user asks if the bot is alive or for a status check.
+    module: ./tools/heartbeat.js
+    handler: heartbeat
+    enabled: true
+
+  - name: cronjob
+    description: Schedule a recurring task with a cron expression. Task must be one of log, heartbeat, check_btc. Use expression '0 * * * *' for every hour (e.g. for check_btc to monitor Bitcoin price). Example '*/5 * * * *' = every 5 minutes.
+    module: ./tools/cronjob.js
+    handler: scheduleCron
+    enabled: true
+
+  - name: get_btc_price
+    description: Get current Bitcoin price in USD from CoinGecko. Use when the user asks for BTC price. To alert when price drops below 65k, schedule cronjob with task 'check_btc' and expression '0 * * * *' (hourly); alerts go to data/memory/alerts.md and GET /api/alerts.
+    module: ./tools/price.js
+    handler: getBtcPriceUsd
+    enabled: true
+
+  - name: workspace_read
+    description: |
+      Read a file from the workspace. Path must be a file path from workspace_tree's file_paths. Do not pass a directory. After reading, reply with content or a summary that MUST cite specific content from the file (e.g. section titles, parameter names, or phrases that appear in it). If you got no content (e.g. ok false or empty response), say clearly that you could not read the file and do NOT invent a summary. Do not mention eligibility, liquidity providers, reward formulas, or contact emails unless they actually appear in the file. Never respond with only raw JSON.
+    module: ./tools/workspace.js
+    handler: workspaceRead
+    enabled: true
+
+  - name: workspace_write
+    description: Create or overwrite a file in the workspace folder. Path is relative (e.g. memory/notes.md). Creates parent directories if needed.
+    module: ./tools/workspace.js
+    handler: workspaceWrite
+    enabled: true
+
+  - name: workspace_delete
+    description: Delete a file in the workspace folder. Path relative to workspace. Fails for directories.
+    module: ./tools/workspace.js
+    handler: workspaceDelete
+    enabled: true
+
+  - name: workspace_list
+    description: List files and subdirectories in a workspace path (one level). Pass path (e.g. memory) or omit for workspace root. Use to traverse one folder at a time.
+    module: ./tools/workspace.js
+    handler: workspaceList
+    enabled: true
+
+  - name: workspace_tree
+    description: Get the full directory tree of the workspace (or a subpath) in one call. Returns a tree string and a flat list of all file paths (file_paths). Use to discover any file without hardcoding—then use workspace_read with a path from file_paths. Use workspace_tree and workspace_read for listing/reading files; use exec to run commands. Pass path (e.g. . or memory) or omit for full workspace; optional max_depth (default 20).
+    module: ./tools/workspace.js
+    handler: workspaceTree
+    enabled: true
+
+  - name: exec
+    description: |
+      Run a shell command in the workspace sandbox. The command runs with the workspace (or workdir) as the current directory. Use to run scripts you created with workspace_write (e.g. node sandbox/script.js, python3 sandbox/script.py, npm install). Pass command (required), optional workdir (relative to workspace, default .), optional timeout in seconds (default 60, max 300). Output is capped at 1 MiB. Do not pass env overrides or arbitrary shell that escapes the workspace—workdir must stay inside workspace.
+    module: ./tools/exec.js
+    handler: runExec
+    enabled: true
+
+  - name: conversation_search
+    description: |
+      Search **our past chat messages** (conversation history in the DB). Use when the user asks "did we talk about X?", "what did we discuss?", or to find past conversations about a topic. Pass query (e.g. "wallets", "Bebop API") and optional limit (default 20, max 50). Returns conversation_id, excerpt, created_at. Do NOT use doc_search for "did we discuss" — doc_search is for documentation only.
+    enabled: true
+
+  - name: solana_address
+    description: |
+      Get the Solana public address of the **app wallet** (already configured in Settings; no user input needed). Use when the user asks for the wallet address, "what are your wallet balances", or "where do I send funds". CRITICAL: There is NO account_address tool in this app—always use solana_address. Do NOT ask the user for an address or file; just call this tool.
+    module: ./tools/solana.js
+    handler: solanaAddress
+    enabled: true
+
+  - name: solana_balance
+    description: |
+      Get SOL balance (and SPL token list) for the **app wallet** (already configured; no user input needed). Use when the user asks for balance, "what are your wallet balances", SOL balance, USDC, or "check my wallet". CRITICAL: There is NO account_balance tool in this app—always use solana_balance. Do NOT ask for an address or file; call this tool directly.
+    module: ./tools/solana.js
+    handler: solanaBalance
+    enabled: true
+
+  - name: solana_transfer
+    description: Send SOL to a recipient address. Pass to (base58 address) and amount_sol (number). Use when the user asks to send SOL. Do not send without clear user intent; confirm amount and recipient.
+    module: ./tools/solana.js
+    handler: solanaTransfer
+    enabled: true
+
+  - name: solana_network
+    description: Get current Solana RPC URL and cluster (mainnet-beta, devnet, testnet). Like listing which network the app wallet is using.
+    module: ./tools/solana.js
+    handler: solanaNetwork
+    enabled: true
+
+  - name: solana_token_balance
+    description: |
+      Get SPL token balance (e.g. USDC) for the **app wallet** by default. Pass mint (token mint address, e.g. USDC mint). Omit owner to use the app wallet—do NOT ask the user for their address; the wallet is built in. Use for "my USDC balance", "token balance", etc. Returns balance and uiAmount.
+    module: ./tools/solana.js
+    handler: solanaTokenBalance
+    enabled: true
+
+  - name: solana_transfer_spl
+    description: Send SPL (token) to a recipient. Pass mint (token mint address), to (recipient base58), amount (integer string in smallest units). Optionally decimals for display. Creates recipient token account if needed. Use when the user asks to send a token (e.g. USDC).
+    module: ./tools/solana.js
+    handler: solanaTransferSpl
+    enabled: true
+
+  - name: solana_tx_history
+    description: Get recent transaction signatures for the app wallet. Pass optional limit (default 20, max 50). Returns list of signature, blockTime, err, slot.
+    module: ./tools/solana.js
+    handler: solanaTxHistory
+    enabled: true
+
+  - name: solana_tx_status
+    description: Check status of a transaction by signature. Pass signature (base58). Returns status (success, failed, not_found), confirmationStatus, err if failed.
+    module: ./tools/solana.js
+    handler: solanaTxStatus
+    enabled: true
+
+  - name: jupiter_price
+    description: Get SOL or other token USD price from Jupiter. Pass ids (optional, default SOL) e.g. "SOL" or comma-separated mint addresses. Returns usdPrice and optional priceChange24h.
+    module: ./tools/jupiter.js
+    handler: jupiterPrice
+    enabled: true
+
+  - name: jupiter_quote
+    description: Get a swap quote from Jupiter (no execution). Pass input_mint, output_mint (default SOL->USDC), amount (in smallest units, default 1 SOL). Returns outAmount, priceImpact.
+    module: ./tools/jupiter.js
+    handler: jupiterQuote
+    enabled: true
+
+  - name: drift_perp_price
+    description: Get SOL-PERP mark price (USD). Uses Jupiter SOL price as proxy. Optional market_index (default 0).
+    module: ./tools/drift.js
+    handler: driftPerpPrice
+    enabled: true
+
+  - name: drift_positions
+    description: Get user's Drift perp positions. Requires configured wallet and Drift user account.
+    module: ./tools/drift.js
+    handler: driftPositions
+    enabled: true
+
+  - name: drift_place_order
+    description: Place a perp order on Drift (stub; not yet implemented).
+    module: ./tools/drift.js
+    handler: driftPlaceOrder
+    enabled: true
+
+  - name: kamino_health
+    description: Get Kamino lending health factor for the configured wallet. Requires Kamino SDK.
+    module: ./tools/kamino.js
+    handler: kaminoHealth
+    enabled: true
+
+  - name: kamino_positions
+    description: Get Kamino lending positions (deposits, borrows). Requires Kamino SDK and wallet.
+    module: ./tools/kamino.js
+    handler: kaminoPositions
+    enabled: true
+
+  - name: kamino_deposit
+    description: Deposit to Kamino (stub; not yet implemented).
+    module: ./tools/kamino.js
+    handler: kaminoDeposit
+    enabled: true
+
+  - name: raydium_quote
+    description: Get Raydium swap quote (stub; use jupiter_quote for now).
+    module: ./tools/raydium.js
+    handler: raydiumQuote
+    enabled: true
+
+  - name: raydium_market_detect
+    description: Detect pump.fun to Raydium migration (stub).
+    module: ./tools/raydium.js
+    handler: raydiumMarketDetect
+    enabled: true
+
+  - name: bet_markets
+    description: List Drift BET / prediction markets (stub).
+    module: ./tools/bet.js
+    handler: betMarkets
+    enabled: true
+
+  - name: bet_positions
+    description: Get user prediction market positions (stub).
+    module: ./tools/bet.js
+    handler: betPositions
+    enabled: true
