@@ -5,9 +5,34 @@ export const SLASH_HELP = `Slash commands:
 • /history – Show saved conversations and let you load a previous one.
 • /help – Show this help text.`;
 
+const LAST_CONVERSATION_KEY = "solagent:lastConversationId";
+
+function loadLastConversationId() {
+  try {
+    const v = window?.localStorage?.getItem(LAST_CONVERSATION_KEY);
+    if (!v) return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLastConversationId(id) {
+  try {
+    if (id == null) {
+      window?.localStorage?.removeItem(LAST_CONVERSATION_KEY);
+      return;
+    }
+    window?.localStorage?.setItem(LAST_CONVERSATION_KEY, String(id));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export const useChatStore = create((set, get) => ({
   conversations: [],
-  currentConversationId: null,
+  currentConversationId: loadLastConversationId(),
   messages: [],
   loading: false,
   error: null,
@@ -76,6 +101,15 @@ export const useChatStore = create((set, get) => ({
       const data = await res.json();
       if (Array.isArray(data.conversations)) {
         set({ conversations: data.conversations });
+        const currentId = get().currentConversationId;
+        // If there is no active chat selected, default to the newest conversation.
+        if (!currentId && data.conversations.length > 0) {
+          const newest = data.conversations[0]?.id;
+          if (newest != null) {
+            saveLastConversationId(newest);
+            get().selectConversation(newest);
+          }
+        }
       }
     } catch (e) {
       set({ error: e.message });
@@ -85,6 +119,7 @@ export const useChatStore = create((set, get) => ({
   selectConversation: async (id) => {
     const { apiBase } = get();
     const base = apiBase || "";
+    saveLastConversationId(id);
     set({ currentConversationId: id, loading: true, error: null, view: "chat" });
     try {
       const res = await fetch(`${base}/api/chat?conversation_id=${id}`);
@@ -149,6 +184,7 @@ export const useChatStore = create((set, get) => ({
         loading: false,
         sessionTokenTotal: prevSession + sessionAdd,
       });
+      saveLastConversationId(data.conversation_id ?? conversationId);
       if (!conversationId) get().fetchConversations();
       if (usage) get().fetchUsageTotal();
       get().fetchNanogptBalance();
@@ -157,7 +193,10 @@ export const useChatStore = create((set, get) => ({
     }
   },
 
-  newChat: () => set({ currentConversationId: null, messages: [], error: null, sessionTokenTotal: 0 }),
+  newChat: () => {
+    saveLastConversationId(null);
+    set({ currentConversationId: null, messages: [], error: null, sessionTokenTotal: 0 });
+  },
 
   fetchUsageTotal: async () => {
     const { apiBase } = get();

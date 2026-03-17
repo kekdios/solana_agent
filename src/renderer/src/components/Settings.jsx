@@ -34,6 +34,7 @@ export default function Settings({ onClose }) {
   const [savingNetwork, setSavingNetwork] = useState(false);
   const [testingSolanaRpc, setTestingSolanaRpc] = useState(false);
   const [solanaRpcStatus, setSolanaRpcStatus] = useState(null); // "CONNECTED" | "NOT_CONNECTED" | null
+  const [savingTier, setSavingTier] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -197,6 +198,31 @@ export default function Settings({ onClose }) {
       }
     } catch (err) {
       setMessage({ type: "error", text: err.message || "Request failed" });
+    }
+  };
+
+  const handleSecurityTierChange = async (e) => {
+    const value = String(e.target.value || "").trim();
+    if (!["1", "2", "3", "4"].includes(value)) return;
+    setMessage(null);
+    setSavingTier(true);
+    try {
+      const res = await fetch(`${apiBase}/api/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "SECURITY_TIER", value }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setConfig((c) => ({ ...(c || {}), securityTier: Number(value) }));
+        setMessage({ type: "success", text: `Security tier set to Tier ${value}.` });
+      } else {
+        setMessage({ type: "error", text: data.error || "Failed to save" });
+      }
+    } catch (err) {
+      setMessage({ type: "error", text: err.message || "Request failed" });
+    } finally {
+      setSavingTier(false);
     }
   };
 
@@ -394,6 +420,7 @@ export default function Settings({ onClose }) {
   };
 
   const chatBackend = config?.chatBackend ?? "nanogpt";
+  const securityTier = Number(config?.securityTier) || 1;
   const apiStatus = config?.INCEPTION_API_KEY?.status ?? "NOT_CONFIGURED";
   const veniceStatus = config?.VENICE_ADMIN_KEY?.status ?? "NOT_CONFIGURED";
   const nanogptStatus = config?.NANOGPT_API_KEY?.status ?? "NOT_CONFIGURED";
@@ -745,6 +772,31 @@ export default function Settings({ onClose }) {
             <p className="text-xs text-slate-500 mt-2">
               Current: <span className="text-slate-400">{config?.solanaNetwork || "testnet"}</span>
             </p>
+          </section>
+
+          <section className="rounded-xl bg-[#222228] border border-[#2a2a30] p-4">
+            <span className="text-xs font-medium uppercase tracking-wider text-slate-400 block mb-3">Security tier</span>
+            <p className="text-sm text-slate-500 mb-3">
+              Controls how autonomous and sovereign the agent is allowed to be. Tier 1 is the default.
+            </p>
+            <label className="text-xs text-slate-500 block mb-1">Active tier</label>
+            <select
+              value={String(securityTier)}
+              onChange={handleSecurityTierChange}
+              disabled={savingTier}
+              className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-50"
+            >
+              <option value="1">Tier 1 — Read-only (safest)</option>
+              <option value="2">Tier 2 — Local authoring (files/docs), limited network</option>
+              <option value="3">Tier 3 — Operator (exec + network), no funds movement</option>
+              <option value="4">Tier 4 — Sovereign (full tools, including transfers)</option>
+            </select>
+            <div className="mt-3 space-y-2 text-xs text-slate-500">
+              <p><span className="text-slate-400 font-medium">Tier 1:</span> Browse + read tools only. No exec, no writes, no cron, no HTTP POST, no transfers.</p>
+              <p><span className="text-slate-400 font-medium">Tier 2:</span> Can write local files/docs and use cron. HTTP requests limited to GET. No exec, no transfers.</p>
+              <p><span className="text-slate-400 font-medium">Tier 3:</span> Can run exec and make HTTP requests. Still blocks SOL/SPL transfers.</p>
+              <p><span className="text-slate-400 font-medium">Tier 4:</span> Full tool access. Use only if you intend the agent to act autonomously with the wallet.</p>
+            </div>
           </section>
 
           <section className="rounded-xl bg-[#222228] border border-[#2a2a30] p-4">

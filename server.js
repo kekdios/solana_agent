@@ -308,8 +308,71 @@ const TOOLS = buildToolsFromRegistry(registry) ?? [
 
 const MAX_TOOL_TURNS = 5;
 
+function toolAllowedByTier(tier, name, args) {
+  const t = clampSecurityTier(tier);
+  if (t >= 4) return true;
+
+  // Always-OK: inspect/read-only tools (no writes, no external side effects).
+  const alwaysAllow = new Set([
+    "browse",
+    "heartbeat",
+    "get_btc_price",
+    "conversation_search",
+    "file_list",
+    "file_read",
+    "workspace_read",
+    "workspace_list",
+    "workspace_tree",
+    "doc_search",
+    "read_docs_folder",
+    "solana_address",
+    "solana_balance",
+    "solana_network",
+    "solana_token_balance",
+    "solana_tx_history",
+    "solana_tx_status",
+    "jupiter_price",
+    "jupiter_quote",
+    "drift_perp_price",
+    "drift_positions",
+    "kamino_health",
+    "kamino_positions",
+    "raydium_quote",
+    "raydium_market_detect",
+    "bet_markets",
+    "bet_positions",
+  ]);
+  if (alwaysAllow.has(name)) return true;
+
+  if (t === 1) {
+    // Tier 1: safest defaults (no shell, no transfers, no mutation, no network POSTs, no background automation).
+    return false;
+  }
+
+  if (t === 2) {
+    // Tier 2: allow local content creation (workspace/docs/files) and limited HTTP fetch (GET only).
+    if (["exec", "solana_transfer", "solana_transfer_spl", "workspace_delete"].includes(name)) return false;
+    if (name === "fetch_url") {
+      const m = String(args?.method || "GET").toUpperCase();
+      if (m === "POST") return false;
+    }
+    return true;
+  }
+
+  if (t === 3) {
+    // Tier 3: operator mode (exec + HTTP allowed), but still block funds movement.
+    if (["solana_transfer", "solana_transfer_spl"].includes(name)) return false;
+    return true;
+  }
+
+  return true;
+}
+
 async function runTool(name, args, env) {
   try {
+    if (!toolAllowedByTier(securityTier, name, args)) {
+      return { ok: false, error: `Tool '${name}' is disabled by security tier ${securityTier}.` };
+    }
     switch (name) {
       case "browse":
         return await browser.browse(args.query ?? "");
@@ -484,12 +547,34 @@ function loadConfigKey(key, envFallback) {
   return envFallback ?? null;
 }
 
+function clampSecurityTier(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 1;
+  if (n < 1) return 1;
+  if (n > 4) return 4;
+  return Math.floor(n);
+}
+
+function ensureDefaultConfigKey(key, plaintextValue) {
+  try {
+    const stored = db.getConfig(key);
+    if (stored) return;
+    const enc = encrypt(String(plaintextValue));
+    if (!enc) return;
+    db.setConfig(key, enc);
+  } catch (_) {}
+}
+
 // Sole source of truth: config table in solagent.db. API keys and secrets stored encrypted; env used only as fallback.
 let apiKey = loadConfigKey("INCEPTION_API_KEY") || process.env.INCEPTION_API_KEY || env.INCEPTION_API_KEY || null;
 let veniceApiKey = loadConfigKey("VENICE_ADMIN_KEY") || process.env.VENICE_ADMIN_KEY || env.VENICE_ADMIN_KEY || null;
 let nanogptApiKey = loadConfigKey("NANOGPT_API_KEY") || process.env.NANOGPT_API_KEY || env.NANOGPT_API_KEY || null;
 let chatBackend = (loadConfigKey("CHAT_BACKEND") || process.env.CHAT_BACKEND || env.CHAT_BACKEND || "").toLowerCase();
 if (chatBackend !== "venice" && chatBackend !== "nanogpt" && chatBackend !== "inception") chatBackend = "nanogpt";
+
+// Hardening tier (1..4). Stored in config table; defaults to tier 1.
+ensureDefaultConfigKey("SECURITY_TIER", "1");
+let securityTier = clampSecurityTier(loadConfigKey("SECURITY_TIER") ?? "1");
 
 // Solana network RPC URLs (default: testnet)
 const SOLANA_NETWORK_URLS = {
@@ -844,6 +929,7 @@ const server = createServer(async (req, res) => {
     res.end(
       JSON.stringify({
         config: {
+          securityTier,
           chatBackend,
           INCEPTION_API_KEY: {
             status: apiKey ? "CONNECTED" : "NOT_CONFIGURED",
@@ -1110,6 +1196,16 @@ const server = createServer(async (req, res) => {
             chatBackend = v;
           }
         }
+      } else if (key === "SECURITY_TIER") {
+        const t = clampSecurityTier(value || "1");
+        const enc = encrypt(String(t));
+        if (!enc) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Encryption failed" }));
+          return;
+        }
+        db.setConfig(key, enc);
+        securityTier = t;
       } else if (key === "PASSPHRASE_BACKUP_ACKNOWLEDGED") {
         const enc = encrypt(value ? "true" : "false");
         if (!enc) {
