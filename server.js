@@ -231,6 +231,11 @@ const PARAM_SCHEMAS = {
     properties: { ids: { type: "string", description: "Token id(s): SOL or comma-separated mint addresses (default SOL)" } },
     required: [],
   },
+  get_sol_price_usd: {
+    type: "object",
+    properties: {},
+    required: [],
+  },
   jupiter_quote: {
     type: "object",
     properties: {
@@ -270,6 +275,16 @@ const PARAM_SCHEMAS = {
       intent_id: { type: "string", description: "Confirmed swap intent id to execute" },
     },
     required: ["intent_id"],
+  },
+  sovereign_transaction: {
+    type: "object",
+    properties: {
+      input_mint: { type: "string", description: "Input token mint (default SOL)" },
+      output_mint: { type: "string", description: "Output token mint (default USDC)" },
+      amount: { type: "string", description: "Amount in smallest units (lamports) for this swap" },
+      slippage_bps: { type: "number", description: "Slippage in basis points (default 50)" },
+    },
+    required: ["amount"],
   },
   drift_perp_price: {
     type: "object",
@@ -383,6 +398,7 @@ function toolAllowedByTier(tier, name, args) {
     "solana_tx_history",
     "solana_tx_status",
     "jupiter_price",
+    "get_sol_price_usd",
     "jupiter_quote",
     "drift_perp_price",
     "drift_positions",
@@ -488,6 +504,8 @@ async function runTool(name, args, env) {
         return await solana.solanaTxStatus(args, env);
       case "jupiter_price":
         return await jupiter.jupiterPrice(args, env);
+      case "get_sol_price_usd":
+        return await getSolPriceUsdCoinGecko();
       case "jupiter_quote":
         return await jupiter.jupiterQuote(args, env);
       case "jupiter_swap_prepare":
@@ -498,6 +516,8 @@ async function runTool(name, args, env) {
         return confirmJupiterSwapIntent(args);
       case "jupiter_swap_execute":
         return await executeJupiterSwapIntent(args, env);
+      case "sovereign_transaction":
+        return await runSovereignTransaction(args, env);
       case "drift_perp_price":
         return await drift.driftPerpPrice(args, env);
       case "drift_positions":
@@ -648,6 +668,22 @@ async function prepareJupiterSwapIntent(args, env) {
   return out;
 }
 
+/** SOL USD price from CoinGecko (same source as Wallet screen). Use for $X → lamports so amount matches wallet. */
+async function getSolPriceUsdCoinGecko() {
+  try {
+    const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd", {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return { ok: false, error: `CoinGecko ${res.status}` };
+    const data = await res.json();
+    const price = data?.solana?.usd;
+    if (typeof price !== "number" || price <= 0) return { ok: false, error: "No SOL price in response" };
+    return { ok: true, price, source: "coingecko", message: "Use this price for $X → lamports so the swap amount matches the Wallet screen." };
+  } catch (e) {
+    return { ok: false, error: e.message || String(e) };
+  }
+}
+
 /** Reject intent_ids that are fabricated (sequential/pattern hex). Real UUIDs from the server are random. */
 function looksLikeFabricatedIntentId(intentId) {
   if (!intentId || typeof intentId !== "string") return false;
@@ -700,6 +736,59 @@ function confirmJupiterSwapIntent(args) {
   const upd = db.setSwapIntentStatus(intentId, "confirmed");
   if (!upd.ok) return { ok: false, error: "Confirm failed" };
   return { ok: true, intent_id: intentId, status: "confirmed", message: "Intent confirmed. Call jupiter_swap_execute with this intent_id to broadcast." };
+}
+
+/** End-to-end helper: prepare -> confirm -> execute a single Jupiter swap. */
+async function runSovereignTransaction(args, env) {
+  const inputMint = (args?.input_mint || args?.inputMint || "").trim() || undefined;
+  const outputMint = (args?.output_mint || args?.outputMint || "").trim() || undefined;
+  const amountRaw = (args?.amount || "").toString().trim();
+  const slippageBps = args?.slippage_bps ?? args?.slippageBps;
+  if (!amountRaw) return { ok: false, stage: "prepare", error: "amount (smallest units) is required" };
+
+  // Step 1: prepare
+  const prepare = await prepareJupiterSwapIntent(
+    {
+      input_mint: inputMint,
+      output_mint: outputMint,
+      amount: amountRaw,
+      slippage_bps: slippageBps,
+    },
+    env
+  );
+  if (!prepare?.ok) {
+    return {
+      ok: false,
+      stage: "prepare",
+      error: prepare?.error || "Prepare failed",
+      prepare,
+    };
+  }
+  const intentId = prepare.intent_id;
+
+  // Step 2: confirm
+  const confirm = confirmJupiterSwapIntent({ intent_id: intentId });
+  if (!confirm?.ok) {
+    return {
+      ok: false,
+      stage: "confirm",
+      error: confirm?.error || "Confirm failed",
+      intent_id: intentId,
+      prepare,
+      confirm,
+    };
+  }
+
+  // Step 3: execute
+  const execute = await executeJupiterSwapIntent({ intent_id: intentId }, env);
+  return {
+    ok: !!execute?.ok,
+    stage: execute?.ok ? "execute" : "execute_failed",
+    intent_id: intentId,
+    prepare,
+    confirm,
+    execute,
+  };
 }
 
 async function executeJupiterSwapIntent(args, env) {
@@ -1767,6 +1856,8 @@ const server = createServer(async (req, res) => {
       if (before && typeof before === "string" && before.trim()) opts.before = before.trim();
       const sigs = await conn.getSignaturesForAddress(pk, opts);
       const agentSigs = new Set(db.getAgentExecutedSignatures(pubKeyB58));
+      const sigList = sigs.map((s) => s.signature);
+      const metaBySig = db.getAgentSwapMetadataBySignatures(sigList);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
@@ -1779,6 +1870,15 @@ const server = createServer(async (req, res) => {
             blockTime: s.blockTime,
             err: s.err,
             agent_executed: agentSigs.has(s.signature),
+            swap: agentSigs.has(s.signature) && metaBySig[s.signature]
+              ? {
+                  input_mint: metaBySig[s.signature].input_mint,
+                  output_mint: metaBySig[s.signature].output_mint,
+                  amount_in: metaBySig[s.signature].amount_in,
+                  expected_out_amount: metaBySig[s.signature].expected_out_amount,
+                  min_out_amount: metaBySig[s.signature].min_out_amount,
+                }
+              : null,
           })),
         })
       );

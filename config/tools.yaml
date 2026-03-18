@@ -215,6 +215,11 @@ tools:
     handler: jupiterPrice
     enabled: true
 
+  - name: get_sol_price_usd
+    description: |
+      Get SOL price in USD from CoinGecko—the SAME source as the Wallet screen. Use this (not jupiter_price) when converting "$X" to lamports for a swap (e.g. "$5 swap"). So the USD amount the user sees on the Wallet matches the swap: amount_lamports = round(X / price * 1e9). Returns price, source "coingecko".
+    enabled: true
+
   - name: jupiter_quote
     description: Get a swap quote from Jupiter (no execution). Pass input_mint, output_mint (default SOL->USDC), amount (in smallest units, default 1 SOL). Returns outAmount, priceImpact.
     module: ./tools/jupiter.js
@@ -241,6 +246,11 @@ tools:
   - name: jupiter_swap_execute
     description: |
       Execute a confirmed swap intent. intent_id MUST be the exact value returned by jupiter_swap_prepare (copy character-for-character). Pattern/fabricated IDs (e.g. 0a1b2c3d-...) are rejected. Call only after prepare and confirm. Tier 4; execution must be enabled in Settings.
+    enabled: true
+
+  - name: sovereign_transaction
+    description: |
+      Atomic Jupiter swap runner: prepare → confirm → execute for a single swap. Pass input_mint, output_mint (defaults SOL->USDC), and amount in smallest units (lamports). The backend prepares an intent, confirms it, and then calls jupiter_swap_execute. Returns nested prepare/confirm/execute results including any signature and SOLSCAN_URL. The agent should use this when it wants a one-shot sovereign swap instead of calling confirm/execute separately. Tier 4.
     enabled: true
 
   - name: get_swap_settings

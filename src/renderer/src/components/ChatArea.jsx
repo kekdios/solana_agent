@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -287,8 +287,16 @@ export default function ChatArea() {
   const error = useChatStore((s) => s.error);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const stopChat = useChatStore((s) => s.stopChat);
+  const apiBase = useChatStore((s) => s.apiBase);
+  const solanaNetwork = useChatStore((s) => s.solanaNetwork);
   const [input, setInput] = useState("");
   const bottomRef = useRef(null);
+  const [latestSwapState, setLatestSwapState] = useState({
+    executing: false,
+    executed: false,
+    error: null,
+    signature: null,
+  });
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -332,6 +340,79 @@ export default function ChatArea() {
     handleSubmit(e);
   };
 
+  const executeLatestSwap = useCallback(async () => {
+    const base = apiBase || "";
+    if (!base || latestSwapState.executing) return;
+
+    const allPrepareResults = [];
+    for (const m of messages) {
+      if (m.role !== "assistant" || !Array.isArray(m.tool_results)) continue;
+      for (const tr of m.tool_results) {
+        if (tr?.tool === "jupiter_swap_prepare" && tr?.result && typeof tr.result === "object" && tr.result?.ok && typeof tr.result.intent_id === "string") {
+          allPrepareResults.push(tr.result);
+        }
+      }
+    }
+    const latest = allPrepareResults.length > 0 ? allPrepareResults[allPrepareResults.length - 1] : null;
+    if (!latest) {
+      setLatestSwapState((s) => ({ ...s, error: "No prepared swap found in this chat." }));
+      return;
+    }
+
+    const intentId = latest.intent_id;
+    setLatestSwapState((s) => ({
+      ...s,
+      executing: true,
+      executed: false,
+      error: null,
+      signature: null,
+    }));
+
+    try {
+      const confRes = await fetch(`${base}/api/jupiter/swap/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intent_id: intentId }),
+      });
+      const confData = await confRes.json();
+      const alreadyConfirmed = !confData.ok && confData.error?.includes("not confirmable from status 'confirmed'");
+      if (!confData.ok && !alreadyConfirmed) throw new Error(confData.error || "Confirm failed");
+
+      const execRes = await fetch(`${base}/api/jupiter/swap/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intent_id: intentId }),
+      });
+      const execData = await execRes.json();
+      if (!execData.ok) throw new Error(execData.error || "Execute failed");
+
+      const sig = execData.signature || execData.VERIFIED_SIGNATURE || null;
+
+      setLatestSwapState((s) => ({
+        ...s,
+        executing: false,
+        executed: true,
+        error: null,
+        signature: sig,
+      }));
+    } catch (e) {
+      setLatestSwapState((s) => ({
+        ...s,
+        executing: false,
+        executed: false,
+        error: e.message || "Execute failed",
+      }));
+    }
+  }, [apiBase, messages, latestSwapState.executing]);
+
+  const solscanTxUrl = (sig) => {
+    if (!sig) return null;
+    const base = `https://solscan.io/tx/${encodeURIComponent(sig)}`;
+    if (solanaNetwork === "devnet") return `${base}?cluster=devnet`;
+    if (solanaNetwork === "testnet") return `${base}?cluster=testnet`;
+    return base;
+  };
+
   return (
     <main className="flex-1 flex flex-col min-w-0 bg-[#0d0d0f]">
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -360,9 +441,6 @@ export default function ChatArea() {
                   ))}
                 </ul>
               </div>
-            )}
-            {m.role === "assistant" && m.tool_results && m.tool_results.length > 0 && (
-              <SwapIntentCard toolResults={m.tool_results} />
             )}
             <div className={`flex ${m.role === "user" ? "justify-end" : "justify-start"} w-full max-w-[80%]`}>
               <div
@@ -413,56 +491,66 @@ export default function ChatArea() {
             </div>
           </div>
         )}
+        <div ref={bottomRef} />
+      </div>
+      <div className="px-4 pt-2 border-t border-[#1e1e24] space-y-3">
         {(() => {
           const allPrepareResults = [];
           for (const m of messages) {
             if (m.role !== "assistant" || !Array.isArray(m.tool_results)) continue;
             for (const tr of m.tool_results) {
-              if (tr?.tool === "jupiter_swap_prepare" && tr?.result && typeof tr.result === "object" && tr.result?.ok && typeof tr.result.intent_id === "string")
-                allPrepareResults.push(tr);
+              if (tr?.tool === "jupiter_swap_prepare" && tr?.result && typeof tr.result === "object" && tr.result?.ok && typeof tr.result.intent_id === "string") {
+                allPrepareResults.push(tr.result);
+              }
             }
           }
           const latest = allPrepareResults.length > 0 ? allPrepareResults[allPrepareResults.length - 1] : null;
           if (!latest) return null;
           return (
-            <div className="flex flex-col gap-1 w-full max-w-[80%]" aria-label="Swap intent – execute">
-              <p className="text-xs text-slate-500">Execute swap (most recent intent)</p>
-              <SwapIntentCard toolResults={[latest]} />
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+              <div className="font-medium uppercase tracking-wider text-amber-200/90 mb-1">Latest prepared swap</div>
+              <div className="font-mono break-all text-amber-100">{latest.intent_id}</div>
+              <div className="mt-1 text-amber-200/80">
+                SOL → USDC • in: <span className="font-mono">{latest.inAmount}</span> • min out:{" "}
+                <span className="font-mono">{latest.minOutAmount}</span> • slippage: <span className="font-mono">{latest.slippageBps}</span> bps
+              </div>
+              <div className="mt-1 text-amber-200/70">
+                Expires: <span className="font-mono">{latest.expires_at}</span>
+              </div>
             </div>
           );
         })()}
-        <div ref={bottomRef} />
-      </div>
-      <form onSubmit={handleSubmit} className="p-4 border-t border-[#1e1e24]">
-        <div className="flex gap-2 items-end">
+        <form onSubmit={handleSubmit} className="space-y-2">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Message… (Shift+Enter for new line) (/save, /history, /help)"
             rows={1}
-            className="flex-1 min-h-[42px] max-h-32 resize-y rounded-xl bg-[#1a1a1e] border border-[#2a2a30] px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 text-sm"
+            className="w-full min-h-[42px] max-h-32 resize-y rounded-xl bg-[#1a1a1e] border border-[#2a2a30] px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 text-sm"
             disabled={loading}
           />
-          {loading ? (
-            <button
-              type="button"
-              onClick={stopChat}
-              className="px-2 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition"
-            >
-              Stop
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!input.trim()}
-              className="px-2 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition"
-            >
-              Send
-            </button>
-          )}
-        </div>
-      </form>
+          <div className="flex gap-2 items-center justify-end">
+            {loading ? (
+              <button
+                type="button"
+                onClick={stopChat}
+                className="px-2 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition"
+              >
+                Stop
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!input.trim()}
+                className="px-2 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition"
+              >
+                Send
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
     </main>
   );
 }

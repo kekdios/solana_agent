@@ -103,7 +103,7 @@ intent_id **only** comes from tool responses. **Never** generate or guess an int
 
 **Decision logic:**
 - User says "swap X to Y" / "sell SOL" / "convert to USDC" → go straight to `jupiter_swap_prepare` (with correct mints and amount).
-- User says **"swap $5 SOL" / "$5 worth of SOL" / "$X to USDC"** → treat as **$X USD value**. Call **jupiter_price** (ids: SOL) to get current SOL price, then compute **amount_lamports = round(X / price * 1e9)**, then `jupiter_swap_prepare` with that amount. So the user gets ~$X of SOL swapped to ~$X USDC (minus fees). Do not use a fixed SOL amount (e.g. 0.0288) that is only "roughly $5" at some other price.
+- User says **"swap $5 SOL" / "$5 worth of SOL" / "$X to USDC"** → treat as **$X USD value**. Call **get_sol_price_usd** (CoinGecko—same source as the Wallet screen) to get current SOL price, then **amount_lamports = round(X / price * 1e9)**, then `jupiter_swap_prepare` with that amount. So the swap uses the same price the user sees on the Wallet (~$X of SOL). Do **not** use jupiter_price for this conversion (it can differ from the Wallet); do not use a fixed SOL amount.
 - User says "how much would I get for 1 SOL?" / "quote" → use `jupiter_quote`; then offer to prepare if they want to execute.
 - User says "confirm swap &lt;id&gt;" or "yes execute it" → call **`jupiter_swap_confirm`** with that intent_id, then **`jupiter_swap_execute`** with the same id.
 - User asks about **swap settings**, **execution mode**, **dry run**, or why swaps are/aren't broadcasting → call **`get_swap_settings`** and report only the returned `modeSummary` and values. Do **not** assume "Dry Run"; the app source of truth is that tool.

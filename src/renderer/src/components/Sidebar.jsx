@@ -15,6 +15,10 @@ export default function Sidebar() {
   const restartServer = useChatStore((s) => s.restartServer);
   const setView = useChatStore((s) => s.setView);
   const view = useChatStore((s) => s.view);
+  const sovereignTx = useChatStore((s) => s.sovereignTx);
+  const latestSwapState = useChatStore((s) => s.latestSwapState);
+  const executeLatestPreparedSwap = useChatStore((s) => s.executeLatestPreparedSwap);
+  const solanaNetwork = useChatStore((s) => s.solanaNetwork);
 
   const [historyOpen, setHistoryOpen] = useState(false);
 
@@ -230,6 +234,64 @@ export default function Sidebar() {
           </button>
         ))}
       </div>
+      {sovereignTx && (
+        <div className="shrink-0 px-3 py-2 border-t border-[#1e1e24] bg-black/30 space-y-1">
+          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Sovereign transaction</p>
+          <p className="text-[11px] text-slate-300 break-words">
+            Stage: <span className="font-mono">{sovereignTx.stage || (sovereignTx.ok ? "execute" : "unknown")}</span>
+          </p>
+          {sovereignTx.intent_id && (
+            <p className="text-[11px] text-slate-300 break-all">
+              Intent: <span className="font-mono">{sovereignTx.intent_id}</span>
+            </p>
+          )}
+          {sovereignTx.execute?.signature && (
+            <p className="text-[11px] text-emerald-300 break-all">
+              Sig: <span className="font-mono">{sovereignTx.execute.signature}</span>
+            </p>
+          )}
+          {sovereignTx.execute?.SOLSCAN_URL && (
+            <a
+              href={sovereignTx.execute.SOLSCAN_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-emerald-300 hover:text-emerald-200 underline"
+            >
+              View on Solscan
+            </a>
+          )}
+          {!sovereignTx.ok && sovereignTx.error && (
+            <p className="text-[11px] text-red-300 break-words">
+              Error: {sovereignTx.error}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={executeLatestPreparedSwap}
+            disabled={latestSwapState.executing || latestSwapState.executed}
+            className="mt-2 w-full px-2 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-black text-xs font-medium transition"
+          >
+            {latestSwapState.executing ? "Executing…" : latestSwapState.executed ? "Executed" : "Execute Swap"}
+          </button>
+          {latestSwapState.signature && (
+            <a
+              href={`https://solscan.io/tx/${encodeURIComponent(latestSwapState.signature)}${
+                solanaNetwork === "devnet" ? "?cluster=devnet" : solanaNetwork === "testnet" ? "?cluster=testnet" : ""
+              }`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-[11px] text-emerald-300 hover:text-emerald-200 underline mt-1"
+            >
+              View latest swap on Solscan
+            </a>
+          )}
+          {latestSwapState.error && (
+            <p className="text-[11px] text-red-300 break-words mt-1">
+              Swap error: {latestSwapState.error}
+            </p>
+          )}
+        </div>
+      )}
       <div className="shrink-0 px-3 py-2 border-t border-[#1e1e24] space-y-1">
         <a
           href="https://solanaagent.app"

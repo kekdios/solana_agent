@@ -52,6 +52,10 @@ export const useChatStore = create((set, get) => ({
   solanaRpcConnected: null,
   /** NanoGPT account balance: { usd_balance, nano_balance, nano_deposit_address } or null if not fetched / no key. */
   nanogptBalance: null,
+  /** Last sovereign_transaction tool result (for sidebar panel). */
+  sovereignTx: null,
+  /** Local state for latest prepared swap execution (for Execute Swap button). */
+  latestSwapState: { executing: false, executed: false, error: null, signature: null },
 
   setApiBase: (base) => set({ apiBase: base || "" }),
 
@@ -146,7 +150,7 @@ export const useChatStore = create((set, get) => ({
   },
 
   sendMessage: async (content) => {
-    const { apiBase, messages, currentConversationId } = get();
+    const { apiBase, messages, currentConversationId, sovereignTx: prevSov, latestSwapState } = get();
     const base = apiBase || "";
     const conversationId = currentConversationId;
     const history = messages.map((m) => ({ role: m.role, content: m.content || "" }));
@@ -174,6 +178,7 @@ export const useChatStore = create((set, get) => ({
       }
       let assistantContent = data.choices?.[0]?.message?.content ?? "";
       const toolResults = data.tool_results || [];
+      const sovereignResult = toolResults.find((tr) => tr.tool === "sovereign_transaction")?.result || null;
       if (toolResults.length > 0) {
         const toolResultsText = toolResults
           .map((tr) => {
@@ -201,6 +206,8 @@ export const useChatStore = create((set, get) => ({
         loading: false,
         currentRequestController: null,
         sessionTokenTotal: prevSession + sessionAdd,
+        sovereignTx: sovereignResult || prevSov || null,
+        latestSwapState: sovereignResult ? latestSwapState : get().latestSwapState,
       });
       saveLastConversationId(data.conversation_id ?? conversationId);
       if (!conversationId) get().fetchConversations();
@@ -234,6 +241,72 @@ export const useChatStore = create((set, get) => ({
     set({ currentConversationId: null, messages: [], error: null, sessionTokenTotal: 0 });
     const base = get().apiBase || "";
     if (base) fetch(`${base}/api/jupiter/swap/clear-expired`, { method: "POST" }).catch(() => {});
+  },
+
+  executeLatestPreparedSwap: async () => {
+    const { apiBase, messages } = get();
+    const base = apiBase || "";
+    if (!base) return;
+
+    const current = get().latestSwapState || { executing: false, executed: false, error: null, signature: null };
+    if (current.executing) return;
+
+    const allPrepareResults = [];
+    for (const m of messages) {
+      if (m.role !== "assistant" || !Array.isArray(m.tool_results)) continue;
+      for (const tr of m.tool_results) {
+        if (tr?.tool === "jupiter_swap_prepare" && tr?.result && typeof tr.result === "object" && tr.result?.ok && typeof tr.result.intent_id === "string") {
+          allPrepareResults.push(tr.result);
+        }
+      }
+    }
+    const latest = allPrepareResults.length > 0 ? allPrepareResults[allPrepareResults.length - 1] : null;
+    if (!latest) {
+      set({ latestSwapState: { ...current, error: "No prepared swap found in this chat." } });
+      return;
+    }
+
+    const intentId = latest.intent_id;
+    set({ latestSwapState: { executing: true, executed: false, error: null, signature: null } });
+
+    try {
+      const confRes = await fetch(`${base}/api/jupiter/swap/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intent_id: intentId }),
+      });
+      const confData = await confRes.json();
+      const alreadyConfirmed = !confData.ok && confData.error?.includes("not confirmable from status 'confirmed'");
+      if (!confData.ok && !alreadyConfirmed) throw new Error(confData.error || "Confirm failed");
+
+      const execRes = await fetch(`${base}/api/jupiter/swap/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intent_id: intentId }),
+      });
+      const execData = await execRes.json();
+      if (!execData.ok) throw new Error(execData.error || "Execute failed");
+
+      const sig = execData.signature || execData.VERIFIED_SIGNATURE || null;
+
+      set({
+        latestSwapState: {
+          executing: false,
+          executed: true,
+          error: null,
+          signature: sig,
+        },
+      });
+    } catch (e) {
+      set({
+        latestSwapState: {
+          executing: false,
+          executed: false,
+          error: e.message || "Execute failed",
+          signature: null,
+        },
+      });
+    }
   },
 
   fetchUsageTotal: async () => {
