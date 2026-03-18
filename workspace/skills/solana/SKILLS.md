@@ -8,7 +8,7 @@ When to use Solana tools and strategies. **You have these tools—use them when 
 
 ## Configuration
 
-- **RPC:** Set `SOLANA_RPC_URL` in `.env` or in app config (e.g. Helius Pro or QuickNode).
+- **RPC:** Set `SOLANA_RPC_URL` in Settings → Environment (or in app config; .env is for testing only).
 - **Wallet:** The app wallet is configured in Settings (encrypted in config). All Solana tools use this wallet unless a tool accepts an optional `owner` (e.g. `solana_token_balance`); omit owner to use the app wallet.
 
 ---
@@ -38,8 +38,9 @@ When to use Solana tools and strategies. **You have these tools—use them when 
 | "SOL price" / "How much is SOL in USD?" | `jupiter_price` (default is SOL) |
 | "Price of [token]" | `jupiter_price` with ids (mint or "SOL", etc.) |
 | "What would I get if I swapped 1 SOL for USDC?" / "Quote a swap" | `jupiter_quote` (input_mint, output_mint, amount) |
+| **"Swap X to USDC" / "Sell my SOL" / "Execute a swap"** | **Prepare→confirm→execute flow:** `jupiter_swap_prepare` → user confirms → `jupiter_swap_execute`. See **`workspace/skills/solana_swaps/SKILLS.md`** for the full playbook. |
 
-Jupiter tools do **not** execute; they return price and quote data only.
+For **executing** swaps (not just quotes), use the prepare→confirm→execute flow. Read **skills/solana_swaps/SKILLS.md** for when to use each tool and examples.
 
 ---
 

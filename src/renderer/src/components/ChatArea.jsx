@@ -286,6 +286,7 @@ export default function ChatArea() {
   const loading = useChatStore((s) => s.loading);
   const error = useChatStore((s) => s.error);
   const sendMessage = useChatStore((s) => s.sendMessage);
+  const stopChat = useChatStore((s) => s.stopChat);
   const [input, setInput] = useState("");
   const bottomRef = useRef(null);
 
@@ -425,13 +426,23 @@ export default function ChatArea() {
             className="flex-1 min-h-[42px] max-h-32 resize-y rounded-xl bg-[#1a1a1e] border border-[#2a2a30] px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 text-sm"
             disabled={loading}
           />
-          <button
-            type="submit"
-            disabled={loading || !input.trim()}
-            className="px-2 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition"
-          >
-            Send
-          </button>
+          {loading ? (
+            <button
+              type="button"
+              onClick={stopChat}
+              className="px-2 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition"
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!input.trim()}
+              className="px-2 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition"
+            >
+              Send
+            </button>
+          )}
         </div>
       </form>
     </main>

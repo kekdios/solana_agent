@@ -82,7 +82,6 @@ async function startInProcessServer(appRoot, userData, port) {
   const dataDir = path.join(userData, "data");
   const dbPath = path.join(dataDir, "solagent.db");
   const workspaceDir = path.join(userData, "workspace");
-  const envPath = path.join(userData, ".env");
 
   try {
     fs.mkdirSync(dataDir, { recursive: true });
@@ -90,23 +89,12 @@ async function startInProcessServer(appRoot, userData, port) {
     console.error("Create data dir failed:", err);
   }
   copyWorkspaceTemplate(userData, appRoot);
-  // Use project .env in app data if app data has no .env yet (e.g. first run or packaged app with .env in bundle)
-  if (!fs.existsSync(envPath)) {
-    const appEnv = path.join(appRoot, ".env");
-    if (fs.existsSync(appEnv)) {
-      try {
-        fs.copyFileSync(appEnv, envPath);
-      } catch (err) {
-        console.error("Copy .env to userData failed:", err);
-      }
-    }
-  }
+  // No .env — config is from Settings (config table) only. .env is not used when shipped.
 
   process.env.PORT = String(port);
   process.env.DB_PATH = dbPath;
   process.env.WORKSPACE_DIR = workspaceDir;
   process.env.DATA_DIR = dataDir;
-  process.env.ENV_PATH = envPath;
   process.env.HOST = process.env.HOST || "127.0.0.1";
 
   const serverPath = path.join(appRoot, "server.js");

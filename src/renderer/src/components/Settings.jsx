@@ -1165,7 +1165,7 @@ export default function Settings({ onClose }) {
 
           <section className="rounded-xl bg-[#222228] border border-[#2a2a30] p-4">
             <span className="text-xs font-medium uppercase tracking-wider text-slate-400 block mb-3">Environment (config table)</span>
-            <p className="text-sm text-slate-500 mb-3">Stored in solagent.db; overrides .env. PORT/HOST apply after restart.</p>
+            <p className="text-sm text-slate-500 mb-3">Stored in solagent.db. PORT/HOST apply after restart. (.env is for testing only.)</p>
             <form onSubmit={handleSaveEnv} className="space-y-3">
               <div>
                 <label className="text-xs text-slate-500 block mb-1">PORT</label>

@@ -35,6 +35,8 @@ export const useChatStore = create((set, get) => ({
   currentConversationId: loadLastConversationId(),
   messages: [],
   loading: false,
+  /** AbortController for the in-flight chat request, if any. */
+  currentRequestController: null,
   error: null,
   apiBase: "",
   sessions: [],
@@ -111,8 +113,12 @@ export const useChatStore = create((set, get) => ({
       if (Array.isArray(data.conversations)) {
         set({ conversations: data.conversations });
         const currentId = get().currentConversationId;
-        // If there is no active chat selected, default to the newest conversation.
-        if (!currentId && data.conversations.length > 0) {
+        const exists = currentId && data.conversations.some((c) => c.id === currentId);
+        if (exists) {
+          // Restore last conversation: load its messages so the chat is not empty on startup.
+          get().selectConversation(currentId);
+        } else if (!currentId && data.conversations.length > 0) {
+          // No saved conversation: default to the newest.
           const newest = data.conversations[0]?.id;
           if (newest != null) {
             saveLastConversationId(newest);
@@ -145,12 +151,14 @@ export const useChatStore = create((set, get) => ({
     const conversationId = currentConversationId;
     const history = messages.map((m) => ({ role: m.role, content: m.content || "" }));
     const newMessages = [...history, { role: "user", content }];
-    set({ loading: true, error: null, messages: newMessages });
+    const controller = new AbortController();
+    set({ loading: true, error: null, messages: newMessages, currentRequestController: controller });
 
     try {
       const res = await fetch(`${base}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           messages: newMessages,
           conversation_id: conversationId || undefined,
@@ -191,6 +199,7 @@ export const useChatStore = create((set, get) => ({
         messages: updated,
         currentConversationId: data.conversation_id ?? conversationId,
         loading: false,
+        currentRequestController: null,
         sessionTokenTotal: prevSession + sessionAdd,
       });
       saveLastConversationId(data.conversation_id ?? conversationId);
@@ -198,8 +207,26 @@ export const useChatStore = create((set, get) => ({
       if (usage) get().fetchUsageTotal();
       get().fetchNanogptBalance();
     } catch (e) {
-      set({ error: e.message, loading: false });
+      if (e.name === "AbortError") {
+        // User hit Stop: keep messages as-is, just clear loading/error/controller.
+        set({ loading: false, error: null, currentRequestController: null });
+      } else {
+        set({ error: e.message, loading: false, currentRequestController: null });
+      }
     }
+  },
+
+  /** Stop the current chat request, similar to Cursor's Stop button. */
+  stopChat: () => {
+    const controller = get().currentRequestController;
+    if (controller) {
+      try {
+        controller.abort();
+      } catch {
+        // ignore
+      }
+    }
+    set({ loading: false, currentRequestController: null });
   },
 
   newChat: () => {

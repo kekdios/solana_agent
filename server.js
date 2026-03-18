@@ -35,6 +35,9 @@ const VENICE_API = "https://api.venice.ai/api/v1/chat/completions";
 const NANOGPT_API = "https://nano-gpt.com/api/v1/chat/completions";
 const WORKSPACE_FILES = ["SOUL.md", "AGENTS.md", "tools.md"];
 
+/** Jupiter swap program ID (mainnet). Used to detect Jupiter transactions vs spam/other. */
+const JUPITER_PROGRAM_ID = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+
 /** Workspace root: config table > env > default. Defined after loadConfigKey. */
 function getWorkspaceDir() {
   return process.env.WORKSPACE_DIR || join(__dirname, "workspace");
@@ -296,6 +299,7 @@ const PARAM_SCHEMAS = {
   },
   bet_markets: { type: "object", properties: {} },
   bet_positions: { type: "object", properties: {} },
+  get_swap_settings: { type: "object", properties: {}, required: [] },
 };
 
 function loadToolRegistry() {
@@ -354,6 +358,7 @@ function toolAllowedByTier(tier, name, args) {
     "browse",
     "heartbeat",
     "get_btc_price",
+    "get_swap_settings",
     "conversation_search",
     "file_list",
     "file_read",
@@ -502,6 +507,8 @@ async function runTool(name, args, env) {
         return await bet.betMarkets(args, env);
       case "bet_positions":
         return await bet.betPositions(args, env);
+      case "get_swap_settings":
+        return getSwapSettings();
       // Redirect legacy EVM-style names to Solana (app is Solana-only)
       case "account_balance":
         return await solana.solanaBalance(args, env);
@@ -522,7 +529,14 @@ async function prepareJupiterSwapIntent(args, env) {
 
   const policy = loadSwapPolicy();
   if (!policy.enabled) {
-    return { ok: false, error: "Swaps are disabled. Enable swaps in Settings (Tier 4) to prepare a swap intent." };
+    const raw = (loadConfigKey("SWAPS_ENABLED") ?? "false").trim().toLowerCase();
+    return {
+      ok: false,
+      error: `Swaps are disabled. Config key SWAPS_ENABLED is currently "${raw}" (must be "true"). Enable the "Enable swaps" toggle in Settings → Swaps. This is separate from Security Tier 4.`,
+      code: "SWAPS_DISABLED",
+      configKey: "SWAPS_ENABLED",
+      configValue: raw,
+    };
   }
 
   const prepared = await jupiter.jupiterSwapPrepare(args, env);
@@ -719,7 +733,7 @@ async function executeJupiterSwapIntent(args, env) {
     if (!built?.ok) throw new Error(built?.error || "Swap tx build failed");
 
     const { Connection, Keypair, VersionedTransaction } = await import("@solana/web3.js");
-    const conn = new Connection(process.env.SOLANA_RPC_URL || env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com", {
+    const conn = new Connection(process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com", {
       commitment: "confirmed",
     });
 
@@ -852,6 +866,10 @@ async function executeJupiterSwapIntent(args, env) {
         intent_id: intentId,
         status: "simulated",
         dry_run: true,
+        broadcast: false,
+        VERIFIED_SIGNATURE: null,
+        SOLSCAN_URL: null,
+        message: "DRY_RUN: simulated only; no transaction was sent. To broadcast real swaps, set Dry-run OFF in Settings → Swaps → Execution.",
         feeLamports,
         unitsConsumed: units,
         programIds: programIdsDebug.programIds,
@@ -872,7 +890,18 @@ async function executeJupiterSwapIntent(args, env) {
       error_code: "",
       error_message: "",
     });
-    return { ok: true, intent_id: intentId, status: "succeeded", signature: sig };
+    const solscanUrl = `https://solscan.io/tx/${sig}`;
+    return {
+      ok: true,
+      intent_id: intentId,
+      status: "succeeded",
+      dry_run: false,
+      broadcast: true,
+      VERIFIED_SIGNATURE: sig,
+      SOLSCAN_URL: solscanUrl,
+      signature: sig,
+      message: "LIVE: transaction broadcast and confirmed. Copy the VERIFIED_SIGNATURE and SOLSCAN_URL below exactly; do not invent or alter.",
+    };
   } catch (e) {
     db.setSwapIntentResult(intentId, { status: "failed", error_code: "EXECUTION_FAILED", error_message: e.message || String(e) });
     return { ok: false, intent_id: intentId, status: "failed", error: e.message || String(e) };
@@ -881,25 +910,14 @@ async function executeJupiterSwapIntent(args, env) {
   }
 }
 
-function loadEnv() {
-  const envPath = process.env.ENV_PATH || join(__dirname, ".env");
-  if (!existsSync(envPath)) return {};
-  const content = readFileSync(envPath, "utf8");
-  const env = {};
-  for (const line of content.split("\n")) {
-    const m = line.match(/^([^#=]+)=(.*)$/);
-    if (m) env[m[1].trim()] = m[2].trim();
-  }
-  return env;
-}
-
 function looksLikeToolArgs(s) {
   if (typeof s !== "string" || s.length > 500) return false;
   const t = s.trim();
   return (t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"));
 }
 
-const env = loadEnv();
+/** No .env fallback — config is from Settings (config table) only. Empty env passed to tools; they use process.env (set from config). */
+const env = {};
 const ENV_PATH = process.env.ENV_PATH || join(__dirname, ".env");
 
 const DB_DIR = process.env.DB_PATH ? dirname(process.env.DB_PATH) : join(__dirname, "data");
@@ -977,12 +995,12 @@ function ensureDefaultConfigKey(key, plaintextValue) {
   } catch (_) {}
 }
 
-// Sole source of truth: config table in solagent.db. API keys and secrets stored encrypted; env used only as fallback.
-let apiKey = loadConfigKey("INCEPTION_API_KEY") || process.env.INCEPTION_API_KEY || env.INCEPTION_API_KEY || null;
-let veniceApiKey = loadConfigKey("VENICE_ADMIN_KEY") || process.env.VENICE_ADMIN_KEY || env.VENICE_ADMIN_KEY || null;
-let nanogptApiKey = loadConfigKey("NANOGPT_API_KEY") || process.env.NANOGPT_API_KEY || env.NANOGPT_API_KEY || null;
-let jupiterApiKey = loadConfigKey("JUPITER_API_KEY") || process.env.JUPITER_API_KEY || env.JUPITER_API_KEY || null;
-let chatBackend = (loadConfigKey("CHAT_BACKEND") || process.env.CHAT_BACKEND || env.CHAT_BACKEND || "").toLowerCase();
+// Sole source of truth: config table in solagent.db. API keys and secrets stored encrypted. No .env fallback (deleted when shipped).
+let apiKey = loadConfigKey("INCEPTION_API_KEY") || null;
+let veniceApiKey = loadConfigKey("VENICE_ADMIN_KEY") || null;
+let nanogptApiKey = loadConfigKey("NANOGPT_API_KEY") || null;
+let jupiterApiKey = loadConfigKey("JUPITER_API_KEY") || null;
+let chatBackend = (loadConfigKey("CHAT_BACKEND") || "").toLowerCase();
 if (chatBackend !== "venice" && chatBackend !== "nanogpt" && chatBackend !== "inception") chatBackend = "nanogpt";
 
 // Hardening tier (1..4). Stored in config table; defaults to tier 1.
@@ -1028,6 +1046,24 @@ function parseBool(s, defaultValue = false) {
   if (v === "true" || v === "1" || v === "yes" || v === "on") return true;
   if (v === "false" || v === "0" || v === "no" || v === "off") return false;
   return defaultValue;
+}
+
+/** Returns current swap execution settings from config (source of truth). Agent must use this when reporting execution mode. */
+function getSwapSettings() {
+  const policy = loadSwapPolicy();
+  const executionEnabled = !!policy.executionEnabled;
+  const executionDryRun = !!policy.executionDryRun;
+  let modeSummary = "Unknown";
+  if (!executionEnabled) modeSummary = "Execution OFF (no broadcast)";
+  else if (executionDryRun) modeSummary = "Execution ON, Dry-run ON (simulate only; no broadcast)";
+  else modeSummary = "Execution ON, Dry-run OFF (live broadcast)";
+  return {
+    ok: true,
+    executionEnabled,
+    executionDryRun,
+    modeSummary,
+    message: "When reporting swap settings to the user, use these exact values. Do not assume Dry Run.",
+  };
 }
 
 function parseCsv(s) {
@@ -1099,15 +1135,15 @@ function getSolanaNetworkFromRpc(url) {
   return "custom";
 }
 
-// Env-style vars: config table overrides .env. Apply to process.env so tools see them at runtime.
+// Env-style vars: config table only. process.env used when Electron/host sets PORT etc. before startup. No .env fallback.
 // Use let so POST /api/config can update them; GET then returns current values without restart.
-let configPort = loadConfigKey("PORT") ?? process.env.PORT ?? env.PORT;
-let configHost = loadConfigKey("HOST") ?? process.env.HOST ?? env.HOST;
-let configSolanaRpc = loadConfigKey("SOLANA_RPC_URL") ?? process.env.SOLANA_RPC_URL ?? env.SOLANA_RPC_URL;
+let configPort = loadConfigKey("PORT") ?? process.env.PORT;
+let configHost = loadConfigKey("HOST") ?? process.env.HOST;
+let configSolanaRpc = loadConfigKey("SOLANA_RPC_URL") ?? process.env.SOLANA_RPC_URL;
 if (!configSolanaRpc || !configSolanaRpc.trim()) configSolanaRpc = DEFAULT_SOLANA_RPC;
-let configHeartbeatMs = loadConfigKey("HEARTBEAT_INTERVAL_MS") ?? process.env.HEARTBEAT_INTERVAL_MS ?? env.HEARTBEAT_INTERVAL_MS;
-let configWorkspaceDir = loadConfigKey("WORKSPACE_DIR") ?? process.env.WORKSPACE_DIR ?? env.WORKSPACE_DIR;
-let configDataDir = loadConfigKey("DATA_DIR") ?? process.env.DATA_DIR ?? env.DATA_DIR;
+let configHeartbeatMs = loadConfigKey("HEARTBEAT_INTERVAL_MS") ?? process.env.HEARTBEAT_INTERVAL_MS;
+let configWorkspaceDir = loadConfigKey("WORKSPACE_DIR") ?? process.env.WORKSPACE_DIR;
+let configDataDir = loadConfigKey("DATA_DIR") ?? process.env.DATA_DIR;
 if (configSolanaRpc) process.env.SOLANA_RPC_URL = configSolanaRpc;
 if (configWorkspaceDir) process.env.WORKSPACE_DIR = configWorkspaceDir;
 if (configDataDir) process.env.DATA_DIR = configDataDir;
@@ -1658,22 +1694,81 @@ const server = createServer(async (req, res) => {
         res.end(JSON.stringify({ ok: false, error: "No wallet", signatures: [] }));
         return;
       }
-      const limit = Math.min(parseInt(url.searchParams.get("limit") || "15", 10) || 15, 30);
+      const limit = Math.min(parseInt(url.searchParams.get("limit") || "30", 10) || 30, 50);
+      const before = url.searchParams.get("before") || undefined;
       const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
       const conn = new Connection(rpcUrl, { commitment: "confirmed" });
       const pk = new PublicKey(pubKeyB58);
-      const sigs = await conn.getSignaturesForAddress(pk, { limit });
+      const opts = { limit };
+      if (before && typeof before === "string" && before.trim()) opts.before = before.trim();
+      const sigs = await conn.getSignaturesForAddress(pk, opts);
+      const agentSigs = new Set(db.getAgentExecutedSignatures(pubKeyB58));
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
           ok: true,
           address: pubKeyB58,
-          signatures: sigs.map((s) => ({ signature: s.signature, blockTime: s.blockTime, err: s.err })),
+          source: "on_chain",
+          agent_signatures: Array.from(agentSigs),
+          signatures: sigs.map((s) => ({
+            signature: s.signature,
+            blockTime: s.blockTime,
+            err: s.err,
+            agent_executed: agentSigs.has(s.signature),
+          })),
         })
       );
     } catch (e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e.message || String(e), signatures: [] }));
+    }
+    return;
+  }
+  if (path === "/api/solana-wallet/tx-type" && req.method === "GET") {
+    const sig = url.searchParams.get("signature");
+    if (!sig || !sig.trim()) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "signature query required" }));
+      return;
+    }
+    try {
+      const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+      const conn = new Connection(rpcUrl, { commitment: "confirmed" });
+      const parsed = await conn.getParsedTransaction(sig.trim(), { maxSupportedTransactionVersion: 0 });
+      if (!parsed?.transaction?.message) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, signature: sig.trim(), type: "unknown", programIds: [] }));
+        return;
+      }
+      const msg = parsed.transaction.message;
+      const accountKeys = msg.accountKeys || [];
+      const keys = accountKeys.map((k) => (typeof k === "string" ? k : k.pubkey));
+      const programIds = new Set();
+      const instructions = msg.instructions || [];
+      for (const ix of instructions) {
+        const idx = ix.programIdIndex;
+        if (typeof idx === "number" && keys[idx]) programIds.add(keys[idx]);
+      }
+      const inner = msg.innerInstructions || [];
+      for (const innerIx of inner) {
+        for (const ix of innerIx.instructions || []) {
+          const idx = ix.programIdIndex;
+          if (typeof idx === "number" && keys[idx]) programIds.add(keys[idx]);
+        }
+      }
+      const isJupiter = Array.from(programIds).some((id) => id === JUPITER_PROGRAM_ID);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: true,
+          signature: sig.trim(),
+          type: isJupiter ? "jupiter" : "other",
+          programIds: Array.from(programIds),
+        })
+      );
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message || String(e) }));
     }
     return;
   }
@@ -1708,7 +1803,7 @@ const server = createServer(async (req, res) => {
     for await (const chunk of req) body += chunk;
     try {
       const data = JSON.parse(body || "{}");
-      const out = await prepareJupiterSwapIntent(data, loadEnv());
+      const out = await prepareJupiterSwapIntent(data, env);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(out));
     } catch (e) {
@@ -1872,7 +1967,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     try {
-      const out = await executeJupiterSwapIntent(data, loadEnv());
+      const out = await executeJupiterSwapIntent(data, env);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(out));
     } catch (e) {
@@ -2027,10 +2122,10 @@ const server = createServer(async (req, res) => {
     const backendConfig = getChatBackendConfig();
     if (!backendConfig.apiKey) {
       const msg = chatBackend === "venice"
-        ? "Venice API key not set. Set VENICE_ADMIN_KEY in .env or use Settings."
+        ? "Venice API key not set. Set VENICE_ADMIN_KEY in Settings."
         : chatBackend === "nanogpt"
-        ? "NanoGPT API key not set. Set NANOGPT_API_KEY in .env or use Settings."
-        : "INCEPTION_API_KEY not set. Add it in .env or use Settings to set API key.";
+        ? "NanoGPT API key not set. Set NANOGPT_API_KEY in Settings."
+        : "INCEPTION_API_KEY not set. Set it in Settings.";
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: msg, provider: chatBackend }));
       return;
@@ -2067,10 +2162,10 @@ const server = createServer(async (req, res) => {
     const backendConfig = getChatBackendConfig();
     if (!backendConfig.apiKey) {
       const msg = chatBackend === "venice"
-        ? "Venice API key not set. Set VENICE_ADMIN_KEY in .env or use Settings."
+        ? "Venice API key not set. Set VENICE_ADMIN_KEY in Settings."
         : chatBackend === "nanogpt"
-        ? "NanoGPT API key not set. Set NANOGPT_API_KEY in .env or use Settings."
-        : "INCEPTION_API_KEY not set. Add it in .env or use Settings to set API key.";
+        ? "NanoGPT API key not set. Set NANOGPT_API_KEY in Settings."
+        : "INCEPTION_API_KEY not set. Set it in Settings.";
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: msg, envPath: ENV_PATH }));
       return;
@@ -2089,14 +2184,17 @@ const server = createServer(async (req, res) => {
       let turns = 0;
       let lastData = null;
       const accumulatedUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-      // Send tools on first message, or when the latest user message suggests browsing or account/wallet actions
+      // Send tools on first message, or when the latest user message suggests browsing, account/wallet, swap, or tool use
       const lastUserContent = (messages.filter((m) => m.role === "user").pop()?.content ?? "").toLowerCase();
       const suggestsBrowse = /\b(visit|browse|check the site|go to|look up|what'?s on|fetch|open this link|get .* from the web|agentchainlab|onboard|crawl|documentation|doc set|pull .* docs|read .* folder|digest|summary|tell me more|\.com|\.io|https?:\/\/)/i.test(lastUserContent);
       const suggestsAccount = /\b(account|balance|wallet|address|transfer|send .* (eth|matic|pol|token)|tx history|transaction history|my balance|check balance|provide .* balance)/i.test(lastUserContent);
       const suggestsSolana = /\b(solana|SOL)\b|sol balance|solana (balance|address|transfer|wallet)/i.test(lastUserContent);
+      const suggestsSwap = /\b(swap|usdc|usdt|intent_id|intent\b|jupiter|slippage|prepare|confirm)\b/i.test(lastUserContent);
       const suggestsMemory = /\b(what did we discuss|past conversation|search .* conversation|find .* conversation|conversation about|we talked about|remember when|previous chat|old conversation|search (past |our )?conversations)/i.test(lastUserContent);
       const suggestsExec = /\b(run|execute|script|node\s|python3?\s|npm\s|npx\s|sandbox)\b/i.test(lastUserContent);
-      const sendTools = messages.length === 1 || suggestsBrowse || suggestsAccount || suggestsSolana || suggestsMemory || suggestsExec;
+      const hasToolUseInHistory = messages.some((m) => m.tool_calls && m.tool_calls.length > 0);
+      const conversationMentionsSwap = messages.some((m) => /intent_id|jupiter_swap|Prepared swap|min.?out|confirm.*swap/i.test((m.content || "")));
+      const sendTools = messages.length === 1 || hasToolUseInHistory || conversationMentionsSwap || suggestsBrowse || suggestsAccount || suggestsSolana || suggestsSwap || suggestsMemory || suggestsExec;
       if (sendTools) {
         const workspaceText = loadWorkspace();
         const walletRule = "Wallet: use solana_balance and solana_address only. There are no account_balance or account_address tools—call solana_balance for balance, solana_address for address.\n\n";
@@ -2533,22 +2631,6 @@ const server = createServer(async (req, res) => {
       apiKey = key;
       const enc = encrypt(key);
       if (enc) db.setConfig("INCEPTION_API_KEY", enc);
-      const dir = join(ENV_PATH, "..");
-      try {
-        mkdirSync(dir, { recursive: true });
-      } catch (_) {}
-      let content = "";
-      if (existsSync(ENV_PATH)) {
-        content = readFileSync(ENV_PATH, "utf8");
-        if (/^\s*INCEPTION_API_KEY\s*=/m.test(content)) {
-          content = content.replace(/^\s*INCEPTION_API_KEY\s*=.*$/m, `INCEPTION_API_KEY=${key}`);
-        } else {
-          content = content.trimEnd() + (content ? "\n" : "") + `INCEPTION_API_KEY=${key}\n`;
-        }
-      } else {
-        content = `INCEPTION_API_KEY=${key}\n`;
-      }
-      writeFileSync(ENV_PATH, content, "utf8");
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, message: "API key saved" }));
     } catch (e) {

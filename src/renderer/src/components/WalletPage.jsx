@@ -76,6 +76,12 @@ export default function WalletPage({ onOpenSettings }) {
   const [solUsd, setSolUsd] = useState(null);
   const [tokenPage, setTokenPage] = useState(0);
   const [logoBySymbol, setLogoBySymbol] = useState({});
+  const [refreshingActivity, setRefreshingActivity] = useState(false);
+  const [activityError, setActivityError] = useState(null);
+  const [activityAddress, setActivityAddress] = useState(null);
+  const [loadingMoreActivity, setLoadingMoreActivity] = useState(false);
+  const [hasMoreActivity, setHasMoreActivity] = useState(true);
+  const [syncFromChainFeedback, setSyncFromChainFeedback] = useState(null);
 
   const fetchConfig = useCallback(() => {
     fetch(`${apiBase}/api/config`)
@@ -94,14 +100,32 @@ export default function WalletPage({ onOpenSettings }) {
       .catch(() => setBalance(null));
   }, [apiBase]);
 
-  const fetchSignatures = useCallback(() => {
-    fetch(`${apiBase}/api/solana-wallet/signatures?limit=15`)
+  const fetchSignatures = useCallback((beforeSig = null) => {
+    if (!beforeSig) setActivityError(null);
+    return fetch(
+      `${apiBase}/api/solana-wallet/signatures?limit=30${beforeSig ? `&before=${encodeURIComponent(beforeSig)}` : ""}`
+    )
       .then((r) => r.json())
       .then((data) => {
-        if (data.ok && Array.isArray(data.signatures)) setSignatures(data.signatures);
-        else setSignatures([]);
+        if (data.ok && Array.isArray(data.signatures)) {
+          if (!beforeSig) {
+            setSignatures(data.signatures);
+            setActivityError(null);
+            setActivityAddress(data.address || null);
+            setHasMoreActivity(data.signatures.length >= 30);
+          } else {
+            setSignatures((prev) => [...prev, ...data.signatures]);
+            setHasMoreActivity(data.signatures.length >= 30);
+          }
+        } else {
+          if (!beforeSig) setActivityError(data.error || "Could not load transactions");
+          setHasMoreActivity(false);
+        }
       })
-      .catch(() => setSignatures([]));
+      .catch((err) => {
+        if (!beforeSig) setActivityError(err?.message || "Network error");
+        setHasMoreActivity(false);
+      });
   }, [apiBase]);
 
   const fetchSolUsd = useCallback(() => {
@@ -117,6 +141,7 @@ export default function WalletPage({ onOpenSettings }) {
   const refresh = useCallback(() => {
     setLoading(true);
     setError(null);
+    setActivityError(null);
     fetchSolUsd();
     Promise.all([
       fetchConfig(),
@@ -124,6 +149,32 @@ export default function WalletPage({ onOpenSettings }) {
       fetchSignatures(),
     ]).finally(() => setLoading(false));
   }, [fetchConfig, fetchBalance, fetchSignatures, fetchSolUsd]);
+
+  const refreshActivity = useCallback(() => {
+    setRefreshingActivity(true);
+    setHasMoreActivity(true);
+    fetchSignatures().finally(() => setRefreshingActivity(false));
+  }, [fetchSignatures]);
+
+  const syncFromChain = useCallback(() => {
+    setSyncFromChainFeedback(null);
+    setRefreshingActivity(true);
+    setHasMoreActivity(true);
+    fetchSignatures()
+      .then(() => {
+        setSyncFromChainFeedback("Synced from Solana");
+        setTimeout(() => setSyncFromChainFeedback(null), 3000);
+      })
+      .finally(() => setRefreshingActivity(false));
+  }, [fetchSignatures]);
+
+  const loadMoreActivity = useCallback(() => {
+    if (signatures.length === 0 || loadingMoreActivity) return;
+    const lastSig = signatures[signatures.length - 1]?.signature;
+    if (!lastSig) return;
+    setLoadingMoreActivity(true);
+    fetchSignatures(lastSig).finally(() => setLoadingMoreActivity(false));
+  }, [signatures, loadingMoreActivity, fetchSignatures]);
 
   useEffect(() => {
     refresh();
@@ -514,28 +565,92 @@ export default function WalletPage({ onOpenSettings }) {
           </p>
         </section>
 
-        {/* Recent activity */}
+        {/* Recent activity — source: on-chain (RPC). Agent badge = executed by this app via jupiter_swap_execute. */}
         <section className="rounded-2xl border border-[#1e1e24] bg-[#121214] p-5">
-          <h2 className="text-sm font-medium text-slate-400 mb-3">Recent activity</h2>
-          {signatures.length === 0 ? (
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div>
+              <h2 className="text-sm font-medium text-slate-400">Recent activity</h2>
+              {activityAddress && (
+                <p className="text-xs text-slate-500 mt-0.5" title={activityAddress}>
+                  Same wallet as in chat: {activityAddress.slice(0, 8)}…{activityAddress.slice(-4)}
+                </p>
+              )}
+              {syncFromChainFeedback && (
+                <p className="text-xs text-emerald-400 mt-1" role="status">{syncFromChainFeedback}</p>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={syncFromChain}
+                disabled={refreshingActivity}
+                className="px-2 py-1 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-white/5 disabled:opacity-50 transition border border-[#1e1e24]"
+                title="Reload list from Solana (on-chain source of truth)"
+              >
+                Sync from chain
+              </button>
+              <button
+                type="button"
+                onClick={refreshActivity}
+                disabled={refreshingActivity}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/5 disabled:opacity-50 transition"
+                title="Refresh transaction list"
+                aria-label="Refresh recent activity"
+              >
+                <svg
+                  className={`w-4 h-4 ${refreshingActivity ? "animate-spin" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          {activityError ? (
+            <p className="text-sm text-amber-400/90" title={activityError}>
+              {activityError}. The agent uses the same wallet and API (solana_tx_history); if the agent showed transactions, this panel should show them after a successful refresh.
+            </p>
+          ) : signatures.length === 0 ? (
             <p className="text-slate-500 text-sm">No recent transactions</p>
           ) : (
-            <ul className="space-y-2">
-              {signatures.map((s, i) => (
-                <li key={i} className="flex items-center justify-between text-sm">
-                  <a
-                    href={`${EXPLORER}/tx/${s.signature}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-mono text-slate-300 hover:text-emerald-400 transition truncate max-w-[14rem]"
-                    title={s.signature}
-                  >
-                    {shortSignature(s.signature)}
-                  </a>
-                  <span className="text-slate-500 text-xs tabular-nums">{formatDate(s.blockTime)}</span>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="space-y-2">
+                {signatures.map((s, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 text-sm">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <a
+                        href={`${EXPLORER}/tx/${s.signature}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-slate-300 hover:text-emerald-400 transition truncate max-w-[14rem]"
+                        title={s.signature}
+                      >
+                        {shortSignature(s.signature)}
+                      </a>
+                      {s.agent_executed && (
+                        <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/20 text-emerald-400" title="Executed by this app (Jupiter swap)">
+                          Agent
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-slate-500 text-xs tabular-nums shrink-0">{formatDate(s.blockTime)}</span>
+                  </li>
+                ))}
+              </ul>
+              {hasMoreActivity && (
+                <button
+                  type="button"
+                  onClick={loadMoreActivity}
+                  disabled={loadingMoreActivity}
+                  className="mt-3 w-full py-2 rounded-lg text-sm text-slate-400 hover:text-slate-200 hover:bg-white/5 disabled:opacity-50 transition"
+                >
+                  {loadingMoreActivity ? "Loading…" : "Load older transactions"}
+                </button>
+              )}
+            </>
           )}
         </section>
       </div>

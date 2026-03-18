@@ -311,6 +311,19 @@ export function getLastSwapCreatedAt(walletPubkey) {
   return row?.created_at || null;
 }
 
+/** Signatures of swaps executed by this agent (jupiter_swap_execute succeeded). Used to flag "Agent" on wallet UI. */
+export function getAgentExecutedSignatures(walletPubkey) {
+  const wallet = String(walletPubkey || "").trim();
+  if (!wallet) return [];
+  const rows = db
+    .prepare(
+      `SELECT signature FROM swap_intents
+       WHERE wallet_pubkey = ? AND status = 'succeeded' AND signature IS NOT NULL AND signature != ''`
+    )
+    .all(wallet);
+  return rows.map((r) => String(r.signature));
+}
+
 const EXCERPT_LEN = 300;
 
 /** Search messages by text; return up to `limit` conversations that contain the query, with excerpt and date. */
