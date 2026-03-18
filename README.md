@@ -135,3 +135,9 @@ The app calls the chat provider you choose in Settings:
 - **Venice:** `https://api.venice.ai/api/v1/chat/completions` — set `VENICE_ADMIN_KEY`
 
 Auth is via the corresponding API key (Bearer or header as required by each provider). See **docs/VENICE_API.md** for Venice details.
+
+## Quick start (owners)
+
+If you’re running the desktop app and just want to get set up quickly (keys, wallet, tiers, swaps, autopilot), see:
+
+- `docs/QUICK_START.md`

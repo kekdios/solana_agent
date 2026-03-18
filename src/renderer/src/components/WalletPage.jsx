@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useChatStore } from "../store/chatStore";
 
 const EXPLORER = "https://explorer.solana.com";
-const LOGOS_API = "https://logos.tradeloop.app/api/getLogos";
+const LOGOS_API_PATH = "/api/logos";
 
 const TOKEN_META_BY_MINT = {
   // Common Solana tokens
@@ -146,12 +146,10 @@ export default function WalletPage({ onOpenSettings }) {
     const payload = {
       symbols: Array.from(symbols),
       resolution: "64",
-      mode: "single",
-      parser: { enable: true, options: { removeNumbers: true } },
     };
 
     let cancelled = false;
-    fetch(LOGOS_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+    fetch(`${apiBase}${LOGOS_API_PATH}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
       .then((r) => r.json())
       .then((arr) => {
         if (cancelled) return;

@@ -1191,6 +1191,7 @@ const server = createServer(async (req, res) => {
     res.end(JSON.stringify({ envPath: ENV_PATH }));
     return;
   }
+  // Note: Quick Start is rendered from a UI-embedded page, not from docs/*.md.
   if (path === "/api/solana-rpc/test" && (req.method === "GET" || req.method === "POST")) {
     const rpcUrl = configSolanaRpc || process.env.SOLANA_RPC_URL || DEFAULT_SOLANA_RPC;
     try {
@@ -1405,6 +1406,39 @@ const server = createServer(async (req, res) => {
     } catch (e) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: e?.message || String(e) }));
+    }
+    return;
+  }
+  // POST /api/logos  body: { symbols: string[], resolution?: "16"|"32"|"64"|"128" }
+  // Proxies logos.tradeloop.app to avoid CORS in the renderer.
+  if (path === "/api/logos" && req.method === "POST") {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    try {
+      const payload = JSON.parse(body || "{}");
+      const symbols = Array.isArray(payload.symbols) ? payload.symbols.map((s) => String(s).trim()).filter(Boolean) : [];
+      const resolution = ["16", "32", "64", "128"].includes(String(payload.resolution)) ? String(payload.resolution) : "64";
+      if (symbols.length === 0) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify([]));
+        return;
+      }
+      const r = await fetch("https://logos.tradeloop.app/api/getLogos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbols,
+          resolution,
+          mode: "single",
+          parser: { enable: true, options: { removeNumbers: true } },
+        }),
+      });
+      const data = await r.json().catch(() => []);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(Array.isArray(data) ? data : []));
+    } catch (e) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify([]));
     }
     return;
   }

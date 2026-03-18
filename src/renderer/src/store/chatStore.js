@@ -42,7 +42,7 @@ export const useChatStore = create((set, get) => ({
   usageTotal: null,
   /** Session token total (current app session only). */
   sessionTokenTotal: 0,
-  /** Main content view: "chat" | "wallet" | "allMessages" | "nanogpt". */
+  /** Main content view: "chat" | "quickStart" | "wallet" | "allMessages" | "nanogpt". */
   view: "chat",
   /** Solana network from config: "testnet" | "devnet" | "mainnet". */
   solanaNetwork: "testnet",
@@ -90,7 +90,16 @@ export const useChatStore = create((set, get) => ({
 
   setView: (view) =>
     set({
-      view: view === "wallet" ? "wallet" : view === "allMessages" ? "allMessages" : view === "nanogpt" ? "nanogpt" : "chat",
+      view:
+        view === "quickStart"
+          ? "quickStart"
+          : view === "wallet"
+          ? "wallet"
+          : view === "allMessages"
+          ? "allMessages"
+          : view === "nanogpt"
+          ? "nanogpt"
+          : "chat",
     }),
 
   fetchConversations: async () => {

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useChatStore } from "./store/chatStore";
 import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
+import QuickStartPage from "./components/QuickStartPage";
 import WalletPage from "./components/WalletPage";
 import AllMessagesPage from "./components/AllMessagesPage";
 import NanoGptPage from "./components/NanoGptPage";
@@ -99,7 +100,9 @@ function App() {
       </header>
       <div className="flex flex-1 min-h-0">
         <Sidebar />
-        {view === "wallet" ? (
+        {view === "quickStart" ? (
+          <QuickStartPage />
+        ) : view === "wallet" ? (
           <WalletPage onOpenSettings={() => setSettingsOpen(true)} />
         ) : view === "allMessages" ? (
           <AllMessagesPage />
