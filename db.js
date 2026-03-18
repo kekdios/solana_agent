@@ -104,6 +104,9 @@ if (!hasColumn("messages", "server_id")) {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_server_ts ON messages(conversation_id, server_ts);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status);`);
 }
+if (!hasColumn("messages", "tool_results")) {
+  db.exec(`ALTER TABLE messages ADD COLUMN tool_results TEXT;`);
+}
 
 export function createConversation() {
   const stmt = db.prepare("INSERT INTO conversations DEFAULT VALUES");
@@ -115,37 +118,50 @@ export function insertMessage(conversationId, role, content, opts = {}) {
   const serverId = opts.server_id ?? randomUUID();
   const serverTs = opts.server_ts ?? Date.now();
   const status = opts.status ?? "sent";
+  const toolResultsJson =
+    opts.tool_results != null && Array.isArray(opts.tool_results)
+      ? JSON.stringify(opts.tool_results)
+      : null;
   const stmt = db.prepare(
-    `INSERT INTO messages (conversation_id, server_id, role, content, server_ts, status)
-     VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT INTO messages (conversation_id, server_id, role, content, server_ts, status, tool_results)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
   );
-  stmt.run(conversationId, serverId, role, content, serverTs, status);
+  stmt.run(conversationId, serverId, role, content, serverTs, status, toolResultsJson);
   return { server_id: serverId, server_ts: serverTs };
 }
 
 const PAGE_SIZE = 20;
+
+function parseToolResults(row) {
+  if (row.tool_results == null || row.tool_results === "") return row;
+  try {
+    const arr = JSON.parse(row.tool_results);
+    if (Array.isArray(arr)) row.tool_results = arr;
+  } catch (_) {}
+  return row;
+}
 
 export function getMessages(conversationId, opts = {}) {
   const limit = Math.min(Number(opts.limit) || PAGE_SIZE, 200);
   const beforeId = opts.before_id != null ? Number(opts.before_id) : null;
   if (beforeId == null) {
     const stmt = db.prepare(
-      `SELECT id, role, content, server_ts, status
+      `SELECT id, role, content, server_ts, status, tool_results
        FROM messages
        WHERE conversation_id = ? AND is_deleted = 0
        ORDER BY id DESC LIMIT ?`
     );
-    const rows = stmt.all(conversationId, limit).reverse();
+    const rows = stmt.all(conversationId, limit).reverse().map(parseToolResults);
     const oldestId = rows.length ? rows[0].id : null;
     return { messages: rows, oldest_id: oldestId, has_more: rows.length === limit };
   }
   const stmt = db.prepare(
-    `SELECT id, role, content, server_ts, status
+    `SELECT id, role, content, server_ts, status, tool_results
      FROM messages
      WHERE conversation_id = ? AND is_deleted = 0 AND id < ?
      ORDER BY id DESC LIMIT ?`
   );
-  const rows = stmt.all(conversationId, beforeId, limit).reverse();
+  const rows = stmt.all(conversationId, beforeId, limit).reverse().map(parseToolResults);
   const oldestId = rows.length ? rows[0].id : null;
   return { messages: rows, oldest_id: oldestId, has_more: rows.length === limit };
 }

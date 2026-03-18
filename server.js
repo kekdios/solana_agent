@@ -648,6 +648,20 @@ async function prepareJupiterSwapIntent(args, env) {
   return out;
 }
 
+/** Reject intent_ids that are fabricated (sequential/pattern hex). Real UUIDs from the server are random. */
+function looksLikeFabricatedIntentId(intentId) {
+  if (!intentId || typeof intentId !== "string") return false;
+  const firstSegment = intentId.split("-")[0] || "";
+  const lower = firstSegment.toLowerCase();
+  const fabricatedPrefixes = [
+    "0a1b2c3d", "1b2c3d4e", "2c3d4e5f", "3d4e5f60", "4d5e6f70", "5e6f7081", "6f708192", "708192a3",
+    "8e9f0a1b", "9f0a1b2c", "a0b1c2d3", "b1c2d3e4", "c2d3e4f5", "d3e4f5a6", "e4f5a6b7", "f5a6b7c8",
+  ];
+  if (fabricatedPrefixes.some((p) => lower.startsWith(p))) return true;
+  if (/[g-z]/i.test(intentId)) return true;
+  return false;
+}
+
 function cancelJupiterSwapIntent(args) {
   const intentId = (args?.intent_id || args?.intentId || "").trim();
   if (!intentId) return { ok: false, error: "intent_id is required" };
@@ -665,6 +679,14 @@ function cancelJupiterSwapIntent(args) {
 function confirmJupiterSwapIntent(args) {
   const intentId = (args?.intent_id || args?.intentId || "").trim();
   if (!intentId) return { ok: false, error: "intent_id is required" };
+  if (looksLikeFabricatedIntentId(intentId)) {
+    return {
+      ok: false,
+      error:
+        "This intent_id looks fabricated (pattern-based, e.g. 0a1b2c3d-...). Use ONLY the intent_id from the jupiter_swap_prepare tool response—copy it character-for-character. Real IDs from the server are random (e.g. f9c3830d-f1f4-4570-b50f-a35fceceb630).",
+      code: "FABRICATED_INTENT_ID",
+    };
+  }
   const intent = db.getSwapIntent(intentId);
   if (!intent) return { ok: false, error: "Not found" };
   if (intent.status !== "prepared") {
@@ -683,6 +705,14 @@ function confirmJupiterSwapIntent(args) {
 async function executeJupiterSwapIntent(args, env) {
   const intentId = (args?.intent_id || args?.intentId || "").trim();
   if (!intentId) return { ok: false, error: "intent_id is required" };
+  if (looksLikeFabricatedIntentId(intentId)) {
+    return {
+      ok: false,
+      error:
+        "This intent_id looks fabricated (pattern-based, e.g. 0a1b2c3d-...). Use ONLY the intent_id from the jupiter_swap_prepare tool response—copy it character-for-character. Real IDs from the server are random (e.g. f9c3830d-f1f4-4570-b50f-a35fceceb630).",
+      code: "FABRICATED_INTENT_ID",
+    };
+  }
 
   const policy = loadSwapPolicy();
   if (!policy.executionEnabled) {
@@ -2330,7 +2360,9 @@ const server = createServer(async (req, res) => {
             assistantContent = "I ran the requested tools. See the results above.";
           }
           if (assistantContent)
-            db.insertMessage(conversationId, "assistant", assistantContent);
+            db.insertMessage(conversationId, "assistant", assistantContent, {
+              tool_results: toolResultsForFrontend.length ? toolResultsForFrontend : undefined,
+            });
           db.insertTokenUsage(conversationId, accumulatedUsage, turns);
           const payload = {
             ...data,
@@ -2368,7 +2400,9 @@ const server = createServer(async (req, res) => {
         const toolList = toolResultsForFrontend.map((tr) => tr.tool).join(", ");
         lastContent = `I ran: ${toolList}. Ask me to summarize what I found or what to do next.`;
       }
-      db.insertMessage(conversationId, "assistant", lastContent);
+      db.insertMessage(conversationId, "assistant", lastContent, {
+        tool_results: toolResultsForFrontend.length ? toolResultsForFrontend : undefined,
+      });
       db.insertTokenUsage(conversationId, accumulatedUsage, turns);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({

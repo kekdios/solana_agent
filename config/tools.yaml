@@ -223,7 +223,7 @@ tools:
 
   - name: jupiter_swap_prepare
     description: |
-      The ONLY way to start a swap. Do NOT simulate or describe swaps in text—call this tool. Prepares a Jupiter swap intent (no execution). Call when the user wants to swap (e.g. "sell SOL", "swap to USDC"). Pass input_mint, output_mint (default SOL->USDC), amount in smallest units, optional slippage_bps. Returns intent_id, expected_out, min_out—use these exact values; never invent an intent_id. All swap execution requires a valid intent_id from this tool's response. Tier 4.
+      The ONLY way to start a swap. Do NOT simulate or describe swaps in text—call this tool. Prepares a Jupiter swap intent (no execution). Call when the user wants to swap (e.g. "sell SOL", "swap to USDC"). Pass input_mint, output_mint (default SOL->USDC), amount in smallest units, optional slippage_bps. Returns intent_id, expected_out, min_out. You MUST copy the intent_id character-for-character from this response when you show it to the user or pass it to confirm/execute—never type a different or pattern-based ID (e.g. 0a1b2c3d-e4f5-6789-...). The server rejects fabricated/pattern intent_ids. Tier 4.
     module: ./tools/jupiter.js
     handler: jupiterSwapPrepare
     enabled: true
@@ -235,12 +235,12 @@ tools:
 
   - name: jupiter_swap_confirm
     description: |
-      Confirm a prepared swap intent by intent_id so it can be executed. Call when the user says "confirm swap <intent_id>" or "yes execute it". Must be called before jupiter_swap_execute; execute only accepts confirmed intents. intent_id must be one returned by jupiter_swap_prepare. Tier 4.
+      Confirm a prepared swap intent by intent_id. Use the EXACT intent_id from a jupiter_swap_prepare response (copy character-for-character). Pattern IDs (e.g. 0a1b2c3d-e4f5-6789-abcd-ef0123456789) are rejected by the server. Call when the user says "confirm swap <intent_id>". Must be called before jupiter_swap_execute. Tier 4.
     enabled: true
 
   - name: jupiter_swap_execute
     description: |
-      The ONLY way to execute a swap. Do NOT describe or simulate execution in text—call this tool. Execute a confirmed swap intent. intent_id MUST be the exact value returned by jupiter_swap_prepare for this swap; never use a made-up or example id. Call ONLY after prepare and after user (or autopilot) confirmation. Server rejects unknown intent_ids. Tier 4; execution must be enabled in Settings.
+      Execute a confirmed swap intent. intent_id MUST be the exact value returned by jupiter_swap_prepare (copy character-for-character). Pattern/fabricated IDs (e.g. 0a1b2c3d-...) are rejected. Call only after prepare and confirm. Tier 4; execution must be enabled in Settings.
     enabled: true
 
   - name: get_swap_settings

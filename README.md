@@ -64,6 +64,11 @@ When you run the Electron app, all writable data (solagent.db, workspace, sessio
 
 **Workspace:** The `workspace/` folder holds persona and rules the model sees on the first message of each conversation: `SOUL.md` (who the assistant is) and `AGENTS.md` (workspace rules). Edit these to change the assistant's identity and behavior. They are injected as a system message only when starting a new conversation. The model can also CRUD files in `workspace/` via tools: `workspace_read`, `workspace_write`, `workspace_delete`, `workspace_list`, `workspace_tree` (paths relative to workspace). The **exec** tool runs shell commands in the workspace (sandbox). **Skills** (MCP-like): structured docs under `workspace/skills/*/SKILLS.md` that the agent reads to learn when and how to use tools (e.g. `skills/solana/SKILLS.md` for Solana wallet and DeFi). Tables: `conversations`, `messages` (conversation_id, role, content, created_at).
 
+**Confirming agent-created memory files:** When the agent says it wrote to `memory/YYYY-MM-DD.md` or `MEMORY.md`, that path is **inside the workspace**. To verify the file exists:
+- **Running from project** (`node server.js` or `./run.sh`): workspace is `agent/workspace/`. Check `agent/workspace/memory/2026-03-18.md` (create the `memory/` folder if the agent just created it).
+- **Electron app** (packaged .app or `npm run electron`): workspace is inside the app's user data folder. On macOS: `~/Library/Application Support/solagent/workspace/`. So daily memory is at `~/Library/Application Support/solagent/workspace/memory/2026-03-18.md`, and long-term memory at `~/Library/Application Support/solagent/workspace/MEMORY.md`. In Terminal: `ls -la ~/Library/Application\ Support/solagent/workspace/memory/` to list daily files.
+If the file is missing, the agent may have described the write without actually calling `workspace_write`; ask it to "write that to memory/2026-03-18.md now" and check again.
+
 **Testing:** From the project root:
 - `node scripts/test-exec-sandbox.js` — exec/sandbox test suite (temp workspace, echo, cwd, workdir, timeout).
 - `npm run test:in-process-server` — starts the server in-process and checks `/api/help` (uses a temp data dir, then removes it).
