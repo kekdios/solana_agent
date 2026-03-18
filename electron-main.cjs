@@ -113,7 +113,7 @@ function createWindow(url, errorDetail) {
   const iconOpt = iconImg ? { icon: iconImg } : {};
   mainWindow = new BrowserWindow({
     width: 1000,
-    height: 1000,
+    height: 950,
     show: false,
     ...iconOpt,
     webPreferences: {

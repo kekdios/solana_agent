@@ -75,6 +75,7 @@ export default function WalletPage({ onOpenSettings }) {
   const [sendResult, setSendResult] = useState(null);
   const [solUsd, setSolUsd] = useState(null);
   const [tokenPage, setTokenPage] = useState(0);
+  const [activityPage, setActivityPage] = useState(0);
   const [logoBySymbol, setLogoBySymbol] = useState({});
   const [refreshingActivity, setRefreshingActivity] = useState(false);
   const [activityError, setActivityError] = useState(null);
@@ -113,6 +114,7 @@ export default function WalletPage({ onOpenSettings }) {
             setActivityError(null);
             setActivityAddress(data.address || null);
             setHasMoreActivity(data.signatures.length >= 30);
+            setActivityPage(0);
           } else {
             setSignatures((prev) => [...prev, ...data.signatures]);
             setHasMoreActivity(data.signatures.length >= 30);
@@ -617,29 +619,76 @@ export default function WalletPage({ onOpenSettings }) {
             <p className="text-slate-500 text-sm">No recent transactions</p>
           ) : (
             <>
-              <ul className="space-y-2">
-                {signatures.map((s, i) => (
-                  <li key={i} className="flex items-center justify-between gap-2 text-sm">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <a
-                        href={`${EXPLORER}/tx/${s.signature}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-mono text-slate-300 hover:text-emerald-400 transition truncate max-w-[14rem]"
-                        title={s.signature}
-                      >
-                        {shortSignature(s.signature)}
-                      </a>
-                      {s.agent_executed && (
-                        <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/20 text-emerald-400" title="Executed by this app (Jupiter swap)">
-                          Agent
-                        </span>
+              {(() => {
+                const pageSize = 10;
+                const totalPages = Math.max(1, Math.ceil(signatures.length / pageSize));
+                const page = Math.min(activityPage, totalPages - 1);
+                const start = page * pageSize;
+                const viewRows = signatures.slice(start, start + pageSize);
+                return (
+                  <>
+                    <ul className="space-y-2">
+                      {viewRows.map((s, i) => (
+                        <li key={`${s.signature}-${i}`} className="flex items-start justify-between gap-2 text-sm">
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <a
+                          href={`${EXPLORER}/tx/${s.signature}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-mono text-slate-300 hover:text-emerald-400 transition truncate max-w-[14rem]"
+                          title={s.signature}
+                        >
+                          {shortSignature(s.signature)}
+                        </a>
+                        {s.agent_executed && (
+                          <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/20 text-emerald-400" title="Executed by this app (Jupiter swap)">
+                            Agent
+                          </span>
+                        )}
+                      </div>
+                      {s.agent_executed && s.swap && (
+                        <div className="text-[11px] text-slate-400 font-mono">
+                          {(() => {
+                            const inMint = s.swap.input_mint;
+                            const outMint = s.swap.output_mint;
+                            const inLabel = inMint === "So11111111111111111111111111111111111111112" ? "SOL" : inMint === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" ? "USDC" : `${inMint.slice(0, 4)}…${inMint.slice(-4)}`;
+                            const outLabel = outMint === "So11111111111111111111111111111111111111112" ? "SOL" : outMint === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" ? "USDC" : `${outMint.slice(0, 4)}…${outMint.slice(-4)}`;
+                            return `${inLabel} in: ${s.swap.amount_in} → ${outLabel} out: ${s.swap.expected_out_amount} (min ${s.swap.min_out_amount})`;
+                          })()}
+                        </div>
                       )}
                     </div>
                     <span className="text-slate-500 text-xs tabular-nums shrink-0">{formatDate(s.blockTime)}</span>
                   </li>
                 ))}
               </ul>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <span className="text-xs text-slate-500 tabular-nums">
+                  Page {page + 1} / {totalPages}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActivityPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                    className="rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-slate-200 transition"
+                  >
+                    Prev
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActivityPage((p) => Math.min(totalPages - 1, p + 1))}
+                    disabled={page >= totalPages - 1}
+                    className="rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-slate-200 transition"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+              </>
+            );
+          })()}
               {hasMoreActivity && (
                 <button
                   type="button"

@@ -340,6 +340,34 @@ export function getAgentExecutedSignatures(walletPubkey) {
   return rows.map((r) => String(r.signature));
 }
 
+/** Map of signature -> { input_mint, output_mint, amount_in, expected_out_amount, min_out_amount } for succeeded swaps. */
+export function getAgentSwapMetadataBySignatures(signatures) {
+  if (!Array.isArray(signatures) || signatures.length === 0) return {};
+  const uniq = Array.from(new Set(signatures.map((s) => String(s).trim()).filter(Boolean)));
+  if (uniq.length === 0) return {};
+  const placeholders = uniq.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT signature, input_mint, output_mint, amount_in, expected_out_amount, min_out_amount
+       FROM swap_intents
+       WHERE status = 'succeeded' AND signature IN (${placeholders})`
+    )
+    .all(...uniq);
+  const out = {};
+  for (const r of rows) {
+    const sig = String(r.signature || "").trim();
+    if (!sig) continue;
+    out[sig] = {
+      input_mint: String(r.input_mint),
+      output_mint: String(r.output_mint),
+      amount_in: String(r.amount_in),
+      expected_out_amount: String(r.expected_out_amount),
+      min_out_amount: String(r.min_out_amount),
+    };
+  }
+  return out;
+}
+
 /** Clear expired and stale swap intents (prepared/confirmed/expired/cancelled with expires_at in the past). Keeps succeeded/failed for audit and Agent badge. */
 export function clearExpiredSwapIntents() {
   db.prepare(
