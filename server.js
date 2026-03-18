@@ -257,6 +257,13 @@ const PARAM_SCHEMAS = {
     },
     required: ["intent_id"],
   },
+  jupiter_swap_confirm: {
+    type: "object",
+    properties: {
+      intent_id: { type: "string", description: "Prepared swap intent id to confirm (required before execute)" },
+    },
+    required: ["intent_id"],
+  },
   jupiter_swap_execute: {
     type: "object",
     properties: {
@@ -300,6 +307,7 @@ const PARAM_SCHEMAS = {
   bet_markets: { type: "object", properties: {} },
   bet_positions: { type: "object", properties: {} },
   get_swap_settings: { type: "object", properties: {}, required: [] },
+  clear_expired_swap_intents: { type: "object", properties: {}, required: [] },
 };
 
 function loadToolRegistry() {
@@ -359,6 +367,7 @@ function toolAllowedByTier(tier, name, args) {
     "heartbeat",
     "get_btc_price",
     "get_swap_settings",
+    "clear_expired_swap_intents",
     "conversation_search",
     "file_list",
     "file_read",
@@ -387,7 +396,7 @@ function toolAllowedByTier(tier, name, args) {
   if (alwaysAllow.has(name)) return true;
 
   // Swap execution flow is Tier 4 only (sovereign funds movement capability).
-  if (name === "jupiter_swap_prepare" || name === "jupiter_swap_execute" || name === "jupiter_swap_cancel") return false;
+  if (name === "jupiter_swap_prepare" || name === "jupiter_swap_execute" || name === "jupiter_swap_cancel" || name === "jupiter_swap_confirm") return false;
 
   if (t === 1) {
     // Tier 1: safest defaults (no shell, no transfers, no mutation, no network POSTs, no background automation).
@@ -485,6 +494,8 @@ async function runTool(name, args, env) {
         return await prepareJupiterSwapIntent(args, env);
       case "jupiter_swap_cancel":
         return cancelJupiterSwapIntent(args);
+      case "jupiter_swap_confirm":
+        return confirmJupiterSwapIntent(args);
       case "jupiter_swap_execute":
         return await executeJupiterSwapIntent(args, env);
       case "drift_perp_price":
@@ -509,6 +520,8 @@ async function runTool(name, args, env) {
         return await bet.betPositions(args, env);
       case "get_swap_settings":
         return getSwapSettings();
+      case "clear_expired_swap_intents":
+        return db.clearExpiredSwapIntents();
       // Redirect legacy EVM-style names to Solana (app is Solana-only)
       case "account_balance":
         return await solana.solanaBalance(args, env);
@@ -646,6 +659,25 @@ function cancelJupiterSwapIntent(args) {
   const upd = db.setSwapIntentStatus(intentId, "cancelled");
   if (!upd.ok) return { ok: false, error: "Cancel failed" };
   return { ok: true, intent_id: intentId, status: "cancelled" };
+}
+
+/** Confirm a prepared swap intent so it can be executed. Call when user says "confirm swap <intent_id>". */
+function confirmJupiterSwapIntent(args) {
+  const intentId = (args?.intent_id || args?.intentId || "").trim();
+  if (!intentId) return { ok: false, error: "intent_id is required" };
+  const intent = db.getSwapIntent(intentId);
+  if (!intent) return { ok: false, error: "Not found" };
+  if (intent.status !== "prepared") {
+    return { ok: false, error: `Intent not confirmable from status '${intent.status}'` };
+  }
+  const expiresMs = Date.parse(intent.expires_at?.endsWith("Z") ? intent.expires_at : intent.expires_at?.replace(" ", "T") + "Z");
+  if (Number.isFinite(expiresMs) && Date.now() > expiresMs) {
+    db.setSwapIntentStatus(intentId, "expired");
+    return { ok: false, error: "Intent expired" };
+  }
+  const upd = db.setSwapIntentStatus(intentId, "confirmed");
+  if (!upd.ok) return { ok: false, error: "Confirm failed" };
+  return { ok: true, intent_id: intentId, status: "confirmed", message: "Intent confirmed. Call jupiter_swap_execute with this intent_id to broadcast." };
 }
 
 async function executeJupiterSwapIntent(args, env) {
@@ -1018,7 +1050,7 @@ ensureDefaultConfigKey("SWAPS_INTENT_TTL_SECONDS", "180");
 ensureDefaultConfigKey("SWAPS_EXECUTION_ENABLED", "false");
 ensureDefaultConfigKey("SWAPS_MAX_REQUOTE_DEVIATION_BPS", "150");
 ensureDefaultConfigKey("SWAPS_EXECUTION_DRY_RUN", "true");
-ensureDefaultConfigKey("SWAPS_MAX_TX_FEE_LAMPORTS", "50000");
+ensureDefaultConfigKey("SWAPS_MAX_TX_FEE_LAMPORTS", "100000");
 ensureDefaultConfigKey("SWAPS_MAX_COMPUTE_UNITS", "1400000");
 ensureDefaultConfigKey("SWAPS_MAX_EXTRA_SOL_LAMPORTS", "3000000");
 ensureDefaultConfigKey(
@@ -1084,7 +1116,9 @@ function loadSwapPolicy() {
   const executionEnabled = parseBool(loadConfigKey("SWAPS_EXECUTION_ENABLED") ?? "false", false);
   const maxRequoteDeviationBps = Math.max(1, Math.min(Number(loadConfigKey("SWAPS_MAX_REQUOTE_DEVIATION_BPS") ?? "150") || 150, 5000));
   const executionDryRun = parseBool(loadConfigKey("SWAPS_EXECUTION_DRY_RUN") ?? "true", true);
-  const maxTxFeeLamports = Math.max(1_000, Math.min(Number(loadConfigKey("SWAPS_MAX_TX_FEE_LAMPORTS") ?? "10000") || 10000, 1_000_000));
+  let maxTxFeeLamports = Number(loadConfigKey("SWAPS_MAX_TX_FEE_LAMPORTS") ?? "100000") || 100000;
+  if (maxTxFeeLamports < 100_000) maxTxFeeLamports = 100_000;
+  maxTxFeeLamports = Math.max(1_000, Math.min(maxTxFeeLamports, 1_000_000));
   const maxComputeUnits = Math.max(200_000, Math.min(Number(loadConfigKey("SWAPS_MAX_COMPUTE_UNITS") ?? "1400000") || 1_400_000, 3_000_000));
   const maxExtraSolLamports = Math.max(0, Math.min(Number(loadConfigKey("SWAPS_MAX_EXTRA_SOL_LAMPORTS") ?? "3000000") || 3_000_000, 50_000_000));
   const allowedProgramIds = parseCsv(loadConfigKey("SWAPS_ALLOWED_PROGRAM_IDS") ?? "");
@@ -1915,6 +1949,18 @@ const server = createServer(async (req, res) => {
     const upd = db.setSwapIntentStatus(intentId, "confirmed");
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: !!upd.ok, intent_id: intentId, status: "confirmed" }));
+    return;
+  }
+  if (path === "/api/jupiter/swap/clear-expired" && req.method === "POST") {
+    const remote = req.socket.remoteAddress || "";
+    if (remote !== "127.0.0.1" && remote !== "::1" && !remote.endsWith("127.0.0.1")) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+      return;
+    }
+    const out = db.clearExpiredSwapIntents();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(out));
     return;
   }
   if (path === "/api/jupiter/swap/cancel" && req.method === "POST") {

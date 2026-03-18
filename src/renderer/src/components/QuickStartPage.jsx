@@ -12,64 +12,48 @@ export default function QuickStartPage() {
 This page is for **owners/operators** of the Solana Agent desktop app (not developers).
 
 ### Start the app
-- **From source (developer run)**:
-
-\`\`\`bash
-cd agent
-npm install
-npm run electron
-\`\`\`
-
+- **From source**: \`cd agent && npm install && npm run electron\`
 - **Packaged app**: open the \`.app\` normally.
 
 ### Open Settings and set your keys
-- **Chat provider key** (one is required for chat):
-  - **NanoGPT**: \`NANOGPT_API_KEY\` (default provider)
-  - **Inception**: \`INCEPTION_API_KEY\`
-  - **Venice**: \`VENICE_ADMIN_KEY\`
-- **Jupiter swaps key** (required for sovereign swaps):
-  - **\`JUPITER_API_KEY\`**
+- **Chat**: NanoGPT / Inception / Venice — set the key for your chosen provider.
+- **Swaps**: Set **JUPITER_API_KEY** (required for Jupiter swaps). Keys are stored encrypted in the config table.
 
-Keys saved in Settings are stored in the app’s **SQLite config table** and are **encrypted at rest**.
+### Create/import your Solana wallet
+In **Settings → Solana Wallet**: generate or import a wallet, fund the address with SOL, and complete the backup steps.
 
-### Create/import your Solana wallet (the app wallet)
-In **Settings → Solana Wallet**:
-- **Generate** a new wallet, or
-- **Import** your private key (base58)
+### Pick your security tier
+In **Settings → Security tier**: **Tier 4** is required for swap execution. Tier 1–3 block funds movement.
 
-Then fund the public address with a small amount of SOL for testing and complete the backup steps.
+### Making swaps work (checklist)
+1. **Settings → API keys**: Set **JUPITER_API_KEY**.
+2. **Settings → Solana Wallet**: Fund the wallet with SOL.
+3. **Settings → Security tier**: Set **Tier 4**.
+4. **Settings → Swaps**: Turn **Enable swaps** ON (otherwise you get "Swaps are disabled").
+5. To **broadcast** real swaps: turn **Execution** ON and **Dry-run** OFF. Use Dry-run ON to test without sending.
+6. Optionally set **Max slippage (bps)** (e.g. 200 = 2%) and click **Save swap policy**.
 
-### Pick your security tier (important)
-In **Settings → Security tier**:
-- **Tier 1–3**: safer defaults (no sovereign swap execution)
-- **Tier 4**: required for **funds movement** tools (including swaps)
+In chat, say e.g. "swap $5 SOL to USDC". Use the **Execute** button in the swap card (or reply "confirm swap &lt;intent_id&gt;") to run the swap. If you see "Not found", start a **New chat** and try again.
 
-### Wallet page: verify balances
-Open **Wallet** to verify SOL + token accounts. Hit **Refresh** after funding.
+### Swap settings reference (Settings → Swaps)
+| Setting | What it does |
+|--------|----------------|
+| **Enable swaps** | Must be ON to prepare any swap (separate from Tier 4). |
+| **Execution** | ON = may broadcast. OFF = no broadcast. |
+| **Dry-run** | ON = simulate only. OFF = live broadcast. |
+| **Max slippage (bps)** | Cap (200 = 2%, 50 = 0.5%). |
+| **Max swap size (SOL)** / **Max % of balance** | Per-swap caps. |
+| **Autopilot** | Auto-confirm (and optionally auto-execute) within limits. |
+| **Cooldown, max/hour, max/day** | Rate limits. |
 
-### Sovereign swaps (Jupiter): safest path
-In **Settings → Swaps (Jupiter)**:
-- Turn on **Enable swaps**
-- Keep **Execution OFF** initially
-- Keep **Dry-run ON** (simulate only)
-
-Then in chat:
-1) Prepare (creates an \`intent_id\`)
-2) Confirm
-3) Execute (dry-run first, then broadcast when ready)
-
-### Optional: Autopilot (explicit opt‑in)
-In **Settings → Swaps → Autopilot**:
-- **Autopilot ON**: can auto-confirm swap intents that satisfy limits
-- **Auto-execute ON**: can auto-execute after confirm (still requires Execution enabled; respects Dry-run if on)
-
-Use strict limits (cooldown, max/hour, max/day, max daily SOL volume). Start with **Auto-execute OFF**.
+### Optional: Autopilot
+In **Settings → Swaps → Autopilot**: turn ON to let the agent auto-confirm intents that pass limits. Use **Auto-execute OFF** until you’re comfortable. Save autopilot limits (cooldown, max/hour, max/day, max daily SOL).
 
 ### Where your data lives (backup)
 - **macOS**: \`~/Library/Application Support/solagent/\`
-- DB: \`~/Library/Application Support/solagent/data/solagent.db\`
+- DB: \`solagent/data/solagent.db\`
 
-Back up that folder to preserve chat history + encrypted config values.`,
+Back up that folder to preserve chat history and encrypted config.`,
     []
   );
 

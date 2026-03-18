@@ -1117,11 +1117,12 @@ export default function Settings({ onClose }) {
                 </p>
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">Max slippage (bps)</label>
+                <label className="text-xs text-slate-500 block mb-1">Max slippage (bps; 200 = 2%, 50 = 0.5%)</label>
                 <input
                   type="text"
                   value={swapsMaxSlippageBps}
                   onChange={(e) => setSwapsMaxSlippageBps(e.target.value)}
+                  placeholder="200"
                   className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                 />
               </div>

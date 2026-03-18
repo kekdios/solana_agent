@@ -324,6 +324,21 @@ export function getAgentExecutedSignatures(walletPubkey) {
   return rows.map((r) => String(r.signature));
 }
 
+/** Clear expired and stale swap intents (prepared/confirmed/expired/cancelled with expires_at in the past). Keeps succeeded/failed for audit and Agent badge. */
+export function clearExpiredSwapIntents() {
+  db.prepare(
+    `UPDATE swap_intents SET status = 'expired'
+     WHERE status IN ('prepared','confirmed') AND expires_at < datetime('now')`
+  ).run();
+  const del = db
+    .prepare(
+      `DELETE FROM swap_intents
+       WHERE status IN ('prepared','confirmed','expired','cancelled') AND expires_at < datetime('now')`
+    )
+    .run();
+  return { ok: true, deleted: del.changes };
+}
+
 const EXCERPT_LEN = 300;
 
 /** Search messages by text; return up to `limit` conversations that contain the query, with excerpt and date. */

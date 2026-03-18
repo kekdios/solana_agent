@@ -107,9 +107,18 @@ function SwapIntentCard({ toolResults }) {
     }
   };
 
-  const execute = async (intent_id) => {
+  /** One-click: confirm (if needed) then execute live. */
+  const confirmAndExecute = async (intent_id) => {
     setStateByIntent((s) => ({ ...s, [intent_id]: { ...(s[intent_id] || {}), executing: true, error: null } }));
     try {
+      const confRes = await fetch(`${base}/api/jupiter/swap/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intent_id }),
+      });
+      const confData = await confRes.json();
+      const alreadyConfirmed = !confData.ok && confData.error?.includes("not confirmable from status 'confirmed'");
+      if (!confData.ok && !alreadyConfirmed) throw new Error(confData.error || "Confirm failed");
       const res = await fetch(`${base}/api/jupiter/swap/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -192,28 +201,19 @@ function SwapIntentCard({ toolResults }) {
                 <div className="shrink-0 flex flex-col gap-2">
                   <button
                     type="button"
-                    disabled={st.confirming || st.confirmed}
-                    onClick={() => confirm(it.intent_id)}
-                    className="rounded-lg bg-amber-500/80 hover:bg-amber-500 disabled:opacity-50 px-3 py-1.5 text-xs font-semibold text-black transition"
-                    title="Confirm this swap intent"
-                  >
-                    {st.confirmed ? "Confirmed" : st.confirming ? "Confirming…" : "Confirm"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!st.confirmed || st.executing || st.executed}
-                    onClick={() => execute(it.intent_id)}
-                    className="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-3 py-1.5 text-xs font-semibold text-white transition"
-                    title="Execute this confirmed intent (respects dry-run setting)"
+                    disabled={st.executing || st.executed}
+                    onClick={() => confirmAndExecute(it.intent_id)}
+                    className="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-4 py-2 text-sm font-semibold text-white transition shadow-sm"
+                    title="Confirm and execute this swap (confirm + broadcast in one click)"
                   >
                     {st.executed ? "Executed" : st.executing ? "Executing…" : "Execute"}
                   </button>
                 </div>
               </div>
               {st.error && <div className="mt-2 text-xs text-red-200">Error: {st.error}</div>}
-              {st.confirmed && (
-                <div className="mt-2 text-xs text-amber-200/80">
-                  Confirmed. You can now Execute (typically in dry-run first).
+              {!st.executed && !st.executing && (
+                <div className="mt-2 text-xs text-amber-200/70">
+                  One click: confirm + broadcast (respects Settings → dry-run).
                 </div>
               )}
               {st.execResult?.dry_run && st.execResult?.status === "simulated" && (
@@ -413,6 +413,24 @@ export default function ChatArea() {
             </div>
           </div>
         )}
+        {(() => {
+          const allPrepareResults = [];
+          for (const m of messages) {
+            if (m.role !== "assistant" || !Array.isArray(m.tool_results)) continue;
+            for (const tr of m.tool_results) {
+              if (tr?.tool === "jupiter_swap_prepare" && tr?.result && typeof tr.result === "object" && tr.result?.ok && typeof tr.result.intent_id === "string")
+                allPrepareResults.push(tr);
+            }
+          }
+          const latest = allPrepareResults.length > 0 ? allPrepareResults[allPrepareResults.length - 1] : null;
+          if (!latest) return null;
+          return (
+            <div className="flex flex-col gap-1 w-full max-w-[80%]" aria-label="Swap intent – execute">
+              <p className="text-xs text-slate-500">Execute swap (most recent intent)</p>
+              <SwapIntentCard toolResults={[latest]} />
+            </div>
+          );
+        })()}
         <div ref={bottomRef} />
       </div>
       <form onSubmit={handleSubmit} className="p-4 border-t border-[#1e1e24]">

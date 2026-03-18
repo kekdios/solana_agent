@@ -233,6 +233,11 @@ tools:
       Cancel a prepared or confirmed swap intent by intent_id. Use when the user says "cancel that swap". intent_id must be one returned by jupiter_swap_prepare. Does not move funds. Tier 4.
     enabled: true
 
+  - name: jupiter_swap_confirm
+    description: |
+      Confirm a prepared swap intent by intent_id so it can be executed. Call when the user says "confirm swap <intent_id>" or "yes execute it". Must be called before jupiter_swap_execute; execute only accepts confirmed intents. intent_id must be one returned by jupiter_swap_prepare. Tier 4.
+    enabled: true
+
   - name: jupiter_swap_execute
     description: |
       The ONLY way to execute a swap. Do NOT describe or simulate execution in text—call this tool. Execute a confirmed swap intent. intent_id MUST be the exact value returned by jupiter_swap_prepare for this swap; never use a made-up or example id. Call ONLY after prepare and after user (or autopilot) confirmation. Server rejects unknown intent_ids. Tier 4; execution must be enabled in Settings.
@@ -241,6 +246,11 @@ tools:
   - name: get_swap_settings
     description: |
       Get the current swap execution settings from the app (source of truth). Returns executionEnabled, executionDryRun, and modeSummary. Call this when the user asks about swap settings, execution mode, dry run, or why swaps are/aren't broadcasting. Report only the values returned; never assume "Dry Run" or "Live" without calling this tool.
+    enabled: true
+
+  - name: clear_expired_swap_intents
+    description: |
+      Remove expired and stale swap intents from the DB (prepared/confirmed/expired/cancelled that are past their expiry). Keeps succeeded/failed for audit. Call when the user says "clear old transactions", "clear old swap intents", or after a new chat so old intents don't cause "Not found". Returns deleted count.
     enabled: true
 
   - name: drift_perp_price

@@ -11,6 +11,7 @@ When the user wants to **convert SOL ↔ USDC** (or other allowed pairs), use th
 - **Do not** invent `intent_id` values (e.g. "temp-001", "abc-123"). The only valid intent_ids are those returned by the `jupiter_swap_prepare` tool.
 - **Do not** produce a swap summary or "execution status" without having called the corresponding tool. If you did not call a tool, do not claim a swap was prepared or executed.
 - **Do not** claim or imply that you executed a swap based on `solana_tx_history` or "recent transactions." Transaction history can include transfers, other apps, etc. The **only** proof that you executed a swap is a successful **jupiter_swap_execute** tool response that returns a real transaction signature. If you did not call `jupiter_swap_execute` and get back a signature in this conversation, you have not executed any swap—say so clearly.
+- **Do not** report success or show a signature when the user clicked the **Execute** button in the chat card. That action does not run your tools—the UI calls the server directly. You have no `jupiter_swap_execute` result. Do not invent VERIFIED_SIGNATURE or SOLSCAN_URL. Point the user to the card (error or success shown there).
 
 ## Required behavior
 
@@ -25,9 +26,10 @@ When the user wants to **convert SOL ↔ USDC** (or other allowed pairs), use th
 | User intent | Action |
 | ----------- | ------ |
 | "Swap 1 SOL to USDC" / "Sell my SOL" / "Go to cash" | **Prepare** immediately (SOL → USDC default). |
+| **"Swap $5 SOL" / "$5 worth of SOL" / "swap $X to USDC"** | User means **$X USD value**. First call **jupiter_price** (ids: "SOL") to get current SOL price, then **amount_lamports = round(X / sol_price_usd * 1e9)**. Then **jupiter_swap_prepare** with that amount. This ensures input is ~$X and output is ~$X USDC (minus fees/slippage). Do **not** use a fixed SOL amount (e.g. 0.0288) that was "roughly $5" at some other price. |
 | "Convert 0.5 SOL to USDC" | **Prepare** with amount in lamports (0.5 SOL = 500_000_000). |
 | "How much would I get for 1 SOL?" / "Quote only" | Use **jupiter_quote** first; offer to prepare when they want to execute. |
-| "Execute the swap" / "Confirm intent abc-123" | Call **jupiter_swap_execute** with that `intent_id` only if it was prepared and is now confirmed. |
+| "Confirm swap abc-123" / "yes execute it" | Call **jupiter_swap_confirm** with that `intent_id`, then **jupiter_swap_execute** with the same id. |
 
 Default output for "sell SOL" / "go to cash" is **USDC**. Use policy allowlists (see Settings); do not guess mints.
 
@@ -38,9 +40,9 @@ Default output for "sell SOL" / "go to cash" is **USDC**. Use policy allowlists 
 **ALWAYS:**
 
 1. **Prepare:** `jupiter_swap_prepare` with `input_mint`, `output_mint` (default SOL → USDC), `amount` (string, smallest units), optional `slippage_bps` (e.g. 50).
-2. **Show summary:** expected out, min out, `intent_id`. Tell the user to confirm in the UI (or that autopilot confirmed).
-3. **Wait for confirmation:** User confirms in the chat card, or autopilot does. Do not call execute until the intent is confirmed.
-4. **Execute:** `jupiter_swap_execute` with the same `intent_id`. Only after step 1 and confirmation.
+2. **Show summary:** expected out, min out, `intent_id`. Tell the user to **click the Execute button** in the swap card above (one click = confirm + broadcast). Do **not** ask them to "reply exactly: execute swap &lt;id&gt;"—the card already has the button. Optionally add: "Or reply 'confirm swap &lt;id&gt;' and I'll run confirm + execute via tools."
+3. **Confirm:** When the user says "confirm swap &lt;intent_id&gt;" or "yes execute it" in chat, call **`jupiter_swap_confirm`** then **`jupiter_swap_execute`**.
+4. **Execute:** `jupiter_swap_execute` with the same `intent_id` only after a successful confirm (from tools or from the user having clicked Execute in the card).
 
 Never call **jupiter_swap_execute** without a prior **jupiter_swap_prepare** and user (or autopilot) confirmation.
 
@@ -52,7 +54,7 @@ Never call **jupiter_swap_execute** without a prior **jupiter_swap_prepare** and
 | --------- | ----------------- |
 | **output_mint** | USDC when user says "sell SOL" / "go to cash" (unless they specify another token). |
 | **input_mint** | SOL (native) when user says "swap SOL" or "sell SOL". |
-| **amount** | Required. String, in **smallest units** (e.g. 1 SOL = `1000000000` lamports). |
+| **amount** | Required. String, in **smallest units** (e.g. 1 SOL = `1000000000` lamports). When user says **"$5" or "$X worth"**, that is USD value: get SOL price via **jupiter_price**, then `amount = round(X / price * 1e9)` so the swap uses ~$X of SOL. |
 | **slippage_bps** | 50 unless user specifies; respect policy max (e.g. 100 bps). |
 
 Use canonical mints from TOOLS.md or config (e.g. SOL = `So11111111111111111111111111111111111111112`, USDC mainnet = `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`).
@@ -93,17 +95,31 @@ Use canonical mints from TOOLS.md or config (e.g. SOL = `So111111111111111111111
 - `amount`: `"1000000000"` (1 SOL in lamports)
 - `slippage_bps`: 50 (or omit)
 
-→ **After the tool returns**, presents the summary from the response: "Prepared swap: 1 SOL → [exact expected_out from tool] USDC (min [min_out from tool]). Intent ID: [intent_id from tool]. Confirm in the card above to execute."
+→ **After the tool returns**, presents the summary from the response: "Prepared swap: 1 SOL → [exact expected_out from tool] USDC (min [min_out from tool]). Intent ID: [intent_id from tool]. **Click Execute in the card above** to confirm and broadcast (one click)."
 
 ---
 
-### Example 2: User confirms
+### Example: "$5 SOL" = $5 USD value
 
-**User:** confirm / yes / execute it
+**User:** swap $5 sol for usdc
+
+**Assistant (CORRECT):**  
+→ Calls **jupiter_price** (ids: "SOL") to get current SOL price (e.g. $146.20).  
+→ Computes **amount_lamports = round(5 / 146.20 * 1e9)** = 34_199_726 (≈ 0.0342 SOL, ~$5).  
+→ Calls **jupiter_swap_prepare** with `amount: "34199726"` (or the computed string), SOL→USDC.  
+→ Reports the tool result (expected_out, min_out, intent_id). User gets ~$5 worth of SOL swapped to ~$5 USDC (minus fees).
+
+**Assistant (WRONG):** Using a fixed 28_800_000 lamports (0.0288 SOL) — that is only ~$5 when SOL ≈ $173; at $146 it's ~$4.21 input and ~$2.70 USDC out. Always derive amount from current price when user says "$X".
+
+---
+
+### Example 2: User confirms (chat)
+
+**User:** confirm swap 238b6483-ec4c-4bc2-814b-3bf57edd85e7 / yes execute it
 
 **Assistant:**  
-→ If the intent is now confirmed in the UI, calls `jupiter_swap_execute` with the **exact intent_id that came from the prepare tool response** (e.g. the UUID returned earlier).  
-→ Reports what the execute tool returns: signature, Solscan link, post-swap balances. Do not invent a signature or status.
+→ Calls **`jupiter_swap_confirm`** with that intent_id first. If it returns ok: true, then calls **`jupiter_swap_execute`** with the same intent_id.  
+→ Reports only what the execute tool returns (VERIFIED_SIGNATURE, SOLSCAN_URL, or error). Do not invent a signature or status. If the user only said "confirm" without the id, use the intent_id from the most recent prepare in this conversation.
 
 ---
 

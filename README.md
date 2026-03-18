@@ -71,11 +71,34 @@ When you run the Electron app, all writable data (solagent.db, workspace, sessio
 
 **Settings (gear icon):** Choose **Chat provider** (NanoGPT default, Inception, or Venice) and set **NanoGPT API key**, **Inception API key**, and/or **Venice API key** (stored encrypted). Manage **Solana wallet** (view/copy public key, reveal private key, generate wallet, passphrase backup). **Environment** — set PORT, HOST, SOLANA_RPC_URL, etc. in the config table (PORT/HOST apply after restart). **Clear all conversation history** — removes all chats, messages, token usage, and saved sessions; confirm before running.
 
-**Swaps (Jupiter):** In Settings → Swaps you can configure policy (allowlists/caps), execution gating, and optional autopilot:
-- `SWAPS_ENABLED` must be on to prepare intents.
-- `SWAPS_EXECUTION_ENABLED` must be on to broadcast swaps (keep off unless intended).
-- `SWAPS_EXECUTION_DRY_RUN` simulates only (no broadcast).
-- **Autopilot** can auto-confirm (and optionally auto-execute) swaps that satisfy strict rate/volume limits.
+**Making swaps work (checklist):**
+
+1. **Settings → API keys:** Set **JUPITER_API_KEY** (required for Jupiter quote/swap API).
+2. **Settings → Solana Wallet:** Create or import a wallet and fund it with SOL.
+3. **Settings → Security tier:** Set to **Tier 4** (required for swap tools; Tier 1–3 block execution).
+4. **Settings → Swaps (Jupiter):**
+   - Turn **Enable swaps** ON (otherwise "Swaps are disabled" when you ask for a swap).
+   - To **broadcast** real swaps: turn **Execution** ON and **Dry-run** OFF. Keep Dry-run ON to test without sending transactions.
+   - Optionally set **Max slippage (bps)** (e.g. 200 = 2% max) and save swap policy.
+
+In chat: ask e.g. "swap $5 SOL to USDC". The agent will prepare an intent; use the **Execute** button in the swap card (or reply "confirm swap &lt;intent_id&gt;") to confirm and broadcast. If you see "Not found" on confirm, start a **New chat** so old intents are cleared, then ask for a fresh swap.
+
+**Swaps (Jupiter) — settings reference:**
+
+| Setting | What it does |
+|--------|----------------|
+| **Enable swaps** | Must be ON to prepare any swap intent. Separate from Security Tier 4. |
+| **Execution** | ON = app may broadcast transactions. OFF = no broadcast (prepare/confirm only). |
+| **Dry-run** | ON = simulate only, no tx sent. OFF = live broadcast when you Execute. |
+| **Max slippage (bps)** | Cap on slippage (200 = 2%, 50 = 0.5%). Requested slippage above this is rejected. |
+| **Max swap size (SOL)** | Max SOL amount per swap (e.g. 0.05). |
+| **Max swap % of balance** | Max share of wallet SOL per swap (e.g. 20%). |
+| **Max requote deviation (bps)** | If quote moves more than this before execute, execution can be blocked. |
+| **Autopilot ON** | Agent can auto-confirm intents that pass limits. |
+| **Auto-execute ON** | After confirm, agent can auto-execute (still needs Execution ON; respects Dry-run). |
+| **Cooldown (s)** | Min seconds between executions. |
+| **Max swaps / hour, / day** | Rate limits. |
+| **Max daily SOL volume** | Total SOL swap volume cap per day. |
 
 **Wallet page:** Shows address + SOL balance, and a paginated token table (10 rows/page) with logos for common tokens (e.g. SOL/USDC) pulled from `https://logos.tradeloop.app/`.
 

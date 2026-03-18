@@ -72,21 +72,39 @@ If you just funded the wallet, hit **Refresh**.
 
 ---
 
-## 6) Sovereign swaps (Jupiter): safest path
+## 6) Making swaps work (checklist)
 
-In **Settings → Swaps (Jupiter)**:
+Follow these in order so swaps actually run:
 
-- Turn on **SWAPS_ENABLED** (Enable swaps)
-- Keep **Execution OFF** initially
-- Keep **Dry-run ON** (simulate only)
+| Step | Where | What to do |
+|------|--------|------------|
+| 1 | **Settings → API keys** | Set **JUPITER_API_KEY** (required for Jupiter). |
+| 2 | **Settings → Solana Wallet** | Create or import a wallet; fund it with SOL. |
+| 3 | **Settings → Security tier** | Set **Tier 4** (Tier 1–3 block swap execution). |
+| 4 | **Settings → Swaps (Jupiter)** | Turn **Enable swaps** ON (otherwise you get "Swaps are disabled"). |
+| 5 | To broadcast real txs | Turn **Execution** ON and **Dry-run** OFF. Keep Dry-run ON to test without sending. |
+| 6 | Optional | Set **Max slippage (bps)** (e.g. 200 = 2%) and click **Save swap policy**. |
 
-In chat, a typical safe flow is:
+In chat: e.g. "swap $5 SOL to USDC". The agent prepares an intent; use the **Execute** button in the swap card (or reply "confirm swap &lt;intent_id&gt;") to confirm and broadcast. If you see "Not found" on confirm, start a **New chat** (clears old intents), then ask for a fresh swap.
 
-1. **Prepare** (creates an `intent_id`)
-2. **Confirm** (binds execution to that intent)
-3. **Execute** (dry-run first, then broadcast when ready)
+---
 
-The app enforces guardrails server-side (caps, allowlists, re-quote checks, simulation, fee/compute bounds).
+## 6b) Swap settings reference (Settings → Swaps)
+
+| Setting | What it does |
+|--------|----------------|
+| **Enable swaps** | Must be ON to prepare any swap. Separate from Tier 4. |
+| **Execution** | ON = app may broadcast. OFF = no broadcast. |
+| **Dry-run** | ON = simulate only. OFF = live broadcast when you Execute. |
+| **Max slippage (bps)** | Cap on slippage (200 = 2%, 50 = 0.5%). |
+| **Max swap size (SOL)** | Max SOL per swap. |
+| **Max swap % of balance** | Max share of wallet SOL per swap. |
+| **Max requote deviation (bps)** | If quote moves more than this before execute, execution can be blocked. |
+| **Autopilot ON** | Agent can auto-confirm intents that pass limits. |
+| **Auto-execute ON** | Agent can auto-execute after confirm (still needs Execution ON; respects Dry-run). |
+| **Cooldown (s)** | Min seconds between executions. |
+| **Max swaps / hour, / day** | Rate limits. |
+| **Max daily SOL volume** | Daily SOL swap volume cap. |
 
 ---
 
@@ -127,7 +145,10 @@ Back up that folder if you want to preserve your:
 
 ## 9) If something looks wrong
 
-- **Swaps not working**: confirm `JUPITER_API_KEY` is set in Settings and you are in **Tier 4**.
-- **Execution blocked**: check **Execution ON/OFF**, **Dry-run**, cooldown/rate limits, and fee/compute caps in Settings → Swaps.
-- **Token icons missing**: ensure you’re on the latest build; the app fetches token logos via a local `/api/logos` proxy.
+- **"Swaps are disabled"**: Turn **Enable swaps** ON in Settings → Swaps (separate from Tier 4).
+- **Swaps not working**: Confirm **JUPITER_API_KEY** in Settings and **Tier 4** in Security tier.
+- **"Not found" when confirming**: Old intent expired or cleared. Start a **New chat**, then ask for a new swap.
+- **Execution blocked**: Check **Execution** ON, **Dry-run** OFF, and cooldown/rate limits in Settings → Swaps.
+- **Fee too high**: In Settings → Swaps, max tx fee is enforced; increase if your RPC/fees are higher.
+- **Token icons missing**: Ensure you’re on the latest build; the app fetches token logos via a local `/api/logos` proxy.
 

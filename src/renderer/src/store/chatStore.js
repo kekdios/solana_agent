@@ -232,6 +232,8 @@ export const useChatStore = create((set, get) => ({
   newChat: () => {
     saveLastConversationId(null);
     set({ currentConversationId: null, messages: [], error: null, sessionTokenTotal: 0 });
+    const base = get().apiBase || "";
+    if (base) fetch(`${base}/api/jupiter/swap/clear-expired`, { method: "POST" }).catch(() => {});
   },
 
   fetchUsageTotal: async () => {
