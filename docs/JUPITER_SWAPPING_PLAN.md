@@ -10,6 +10,7 @@ Build SOL→USDC swap execution into the desktop agent as a **self-custody tradi
 - **AI proposes; system enforces; user commits**: the model cannot execute a swap from free-form parameters.
 - **Deterministic constraints > AI judgment**: caps, allowlists, and checks must be enforced server-side.
 - **No `exec` path to spend funds**: swaps must occur through a narrow swap tool, not shell scripts.
+- **Jupiter API correctness**: use Jupiter’s current developer base URL `https://api.jup.ag` and the **Metis Swap API** (`GET /swap/v1/quote`, `POST /swap/v1/swap`) with an `x-api-key` (free key via Jupiter Portal). See [Jupiter API Reference](https://dev.jup.ag/api-reference) and the docs index in `https://dev.jup.ag/llms.txt`.
 
 ---
 
@@ -36,7 +37,7 @@ Build SOL→USDC swap execution into the desktop agent as a **self-custody tradi
 **Server actions**
 
 1. Validate **policy** (allowlist + caps + tier + swaps enabled).
-2. Fetch a Jupiter quote (fresh).
+2. Fetch a Jupiter quote (fresh) from `GET https://api.jup.ag/swap/v1/quote` (Metis).
 3. Compute:
    - `expected_out_amount`
    - `min_out_amount` (from slippage)
@@ -75,20 +76,19 @@ No execution happens until the user explicitly confirms the intent:
 **Server actions (strict order)**
 
 1. Load intent and validate:
-   - status = `prepared`
+   - status = `confirmed`
    - not expired
    - Tier = 4 and swaps enabled
+   - execution enabled (separate kill-switch)
 2. **Wallet mutex**: only one swap execution at a time per wallet.
 3. **Swap lock (default ON)**: while `executing`, block other high-risk tools (at minimum `exec` and `fetch_url` POST).
 4. **Execution-time re-quote check**:
-   - fetch a fresh quote for the same params
+   - fetch a fresh quote for the same params (`GET https://api.jup.ag/swap/v1/quote`)
    - abort if deviation exceeds a threshold (bps)
-5. Request serialized swap transaction from Jupiter.
-6. **Mandatory simulation** with explicit checks:
-   - **min-out enforcement** via simulated token balance delta: output delta ≥ stored `min_out_amount`
-   - input delta ≈ intended input (tolerance for wrap/fees)
-   - **program allowlist**: reject unexpected program IDs/instructions
-   - fee + compute within bounds
+5. Request serialized swap transaction from Jupiter (`POST https://api.jup.ag/swap/v1/swap`) using the stored quote response.
+6. **Mandatory simulation**:
+   - must simulate successfully (no error)
+   - (v1) deeper checks like token-delta + program allowlist are recommended next hardening steps
 7. If simulation passes: sign locally, send, confirm.
 8. Persist:
    - signature, slot, status transitions: `executing → sent → confirmed` (or `failed`)
@@ -112,6 +112,8 @@ All guardrails are stored in the config table (Settings UI), and the values used
 Recommended policy keys:
 
 - `SWAPS_ENABLED` (default false)
+- `SWAPS_EXECUTION_ENABLED` (default false; separate kill-switch so tests/UI can be safe)
+- `SWAPS_EXECUTION_DRY_RUN` (default true; simulate only)
 - `ALLOWED_OUTPUT_MINTS` (start: USDC only)
 - `MAX_SLIPPAGE_BPS` (default 50)
 - `MAX_SWAP_SOL` (absolute cap)
@@ -122,6 +124,15 @@ Recommended policy keys:
 - `MAX_DAILY_SWAP_SOL_VOLUME`
 - `QUOTE_DEVIATION_BPS_MAX` (execute-time re-quote threshold)
 - `MAX_TX_FEE_LAMPORTS` and compute cap
+- `SWAPS_ALLOWED_PROGRAM_IDS` (program allowlist)
+- `SWAPS_MAX_EXTRA_SOL_LAMPORTS` (SOL spend buffer for wrap/rent overhead)
+- **Autopilot (explicit opt-in):**
+  - `SWAPS_AUTOPILOT_ENABLED` (default false)
+  - `SWAPS_AUTOPILOT_AUTO_EXECUTE` (default false)
+  - `SWAPS_COOLDOWN_SECONDS`
+  - `SWAPS_MAX_SWAPS_PER_HOUR`
+  - `SWAPS_MAX_SWAPS_PER_DAY`
+  - `SWAPS_MAX_DAILY_SWAP_SOL_VOLUME`
 
 ---
 
@@ -151,6 +162,7 @@ Add a Swaps section (Tier 4 only):
 - per-swap caps + % cap
 - cooldown/rate limits + daily volume cap
 - sovereignty warning (this signs transactions with your local wallet)
+- Autopilot section with strict limits and a separate auto-execute toggle
 
 ### Confirmation UX
 
@@ -172,6 +184,35 @@ When `prepare` returns an intent:
 5. Add Settings controls for swap policies + Tier 4 gating
 6. Add UI confirmation flow
 7. Devnet validation, then mainnet with tiny caps
+
+---
+
+## 9) Current implementation status (this repo)
+
+Implemented:
+
+- `swap_intents` table + helpers.
+- `jupiter_swap_prepare`:
+  - policy enforcement: allowlists, slippage cap, SOL caps, % balance cap
+  - intent storage with TTL and policy snapshot
+- Confirmation:
+  - `POST /api/jupiter/swap/confirm` sets status `prepared → confirmed`
+  - chat UI shows a confirmation card for `intent_id`
+- Cancel:
+  - `jupiter_swap_cancel` and `POST /api/jupiter/swap/cancel` sets `prepared/confirmed → cancelled`
+- Execute (Tier 4):
+  - implemented end-to-end execution path: re-quote deviation check → build swap tx via Jupiter → simulate → sign+send+confirm
+  - **gated by** `SWAPS_EXECUTION_ENABLED` (default `false`)
+  - fee/compute bounds, program allowlist, simulation min-out enforcement, and SOL spend bounds
+- Autopilot (Tier 4):
+  - optional auto-confirm of prepared intents (`SWAPS_AUTOPILOT_ENABLED`)
+  - optional auto-execute after auto-confirm (`SWAPS_AUTOPILOT_AUTO_EXECUTE`) (still requires execution enabled; respects dry-run)
+  - cooldown + rate/volume limits enforced server-side
+
+Tests:
+
+- `node scripts/test-jupiter-swap-prepare.js`
+- `node scripts/test-jupiter-swap-execute.js` (safe: asserts execution is blocked by default)
 
 ---
 

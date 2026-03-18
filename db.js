@@ -48,6 +48,45 @@ db.exec(`
   );
 `);
 
+// Swap intents for sovereign Jupiter execution (Tier 4 only). Created here to keep schema centralized.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS swap_intents (
+    intent_id TEXT PRIMARY KEY,
+    wallet_pubkey TEXT NOT NULL,
+    input_mint TEXT NOT NULL,
+    output_mint TEXT NOT NULL,
+    amount_in TEXT NOT NULL,
+    slippage_bps INTEGER NOT NULL,
+    expected_out_amount TEXT NOT NULL,
+    min_out_amount TEXT NOT NULL,
+    quote_json TEXT NOT NULL,
+    quote_hash TEXT NOT NULL,
+    policy_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'prepared',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    signature TEXT,
+    fee_lamports INTEGER,
+    units_consumed INTEGER,
+    program_ids_json TEXT,
+    error_code TEXT,
+    error_message TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_swap_intents_status_created ON swap_intents(status, created_at);
+  CREATE INDEX IF NOT EXISTS idx_swap_intents_wallet_created ON swap_intents(wallet_pubkey, created_at);
+`);
+
+// Backfill columns for existing DBs.
+if (!hasColumn("swap_intents", "fee_lamports")) {
+  db.exec(`ALTER TABLE swap_intents ADD COLUMN fee_lamports INTEGER;`);
+}
+if (!hasColumn("swap_intents", "units_consumed")) {
+  db.exec(`ALTER TABLE swap_intents ADD COLUMN units_consumed INTEGER;`);
+}
+if (!hasColumn("swap_intents", "program_ids_json")) {
+  db.exec(`ALTER TABLE swap_intents ADD COLUMN program_ids_json TEXT;`);
+}
+
 function hasColumn(table, column) {
   const info = db.prepare(`PRAGMA table_info(${table})`).all();
   return info.some((c) => c.name === column);
@@ -126,6 +165,150 @@ export function clearAllConversations() {
     db.prepare("DELETE FROM conversations").run();
   });
   run();
+}
+
+export function insertSwapIntent(intent) {
+  const stmt = db.prepare(
+    `INSERT INTO swap_intents (
+      intent_id, wallet_pubkey, input_mint, output_mint, amount_in, slippage_bps,
+      expected_out_amount, min_out_amount, quote_json, quote_hash, policy_json,
+      status, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  stmt.run(
+    intent.intent_id,
+    intent.wallet_pubkey,
+    intent.input_mint,
+    intent.output_mint,
+    String(intent.amount_in),
+    Number(intent.slippage_bps),
+    String(intent.expected_out_amount),
+    String(intent.min_out_amount),
+    String(intent.quote_json),
+    String(intent.quote_hash),
+    String(intent.policy_json),
+    intent.status || "prepared",
+    String(intent.expires_at)
+  );
+  return { ok: true, intent_id: intent.intent_id };
+}
+
+export function getSwapIntent(intentId) {
+  const row = db.prepare(
+    `SELECT
+      intent_id, wallet_pubkey, input_mint, output_mint, amount_in, slippage_bps,
+      expected_out_amount, min_out_amount, quote_json, quote_hash, policy_json,
+      status, created_at, expires_at, signature, fee_lamports, units_consumed, program_ids_json, error_code, error_message
+     FROM swap_intents WHERE intent_id = ?`
+  ).get(String(intentId));
+  return row || null;
+}
+
+export function setSwapIntentStatus(intentId, status) {
+  const s = String(status || "").trim();
+  if (!s) return { ok: false, error: "status required" };
+  const info = db
+    .prepare(`UPDATE swap_intents SET status = ? WHERE intent_id = ?`)
+    .run(s, String(intentId));
+  return { ok: info.changes === 1 };
+}
+
+export function setSwapIntentResult(intentId, patch = {}) {
+  const fields = [];
+  const values = [];
+  if (patch.status != null) {
+    fields.push("status = ?");
+    values.push(String(patch.status));
+  }
+  if (patch.signature != null) {
+    fields.push("signature = ?");
+    values.push(String(patch.signature));
+  }
+  if (patch.fee_lamports != null) {
+    fields.push("fee_lamports = ?");
+    values.push(Number(patch.fee_lamports));
+  }
+  if (patch.units_consumed != null) {
+    fields.push("units_consumed = ?");
+    values.push(Number(patch.units_consumed));
+  }
+  if (patch.program_ids_json != null) {
+    fields.push("program_ids_json = ?");
+    values.push(String(patch.program_ids_json));
+  }
+  if (patch.error_code != null) {
+    fields.push("error_code = ?");
+    values.push(String(patch.error_code));
+  }
+  if (patch.error_message != null) {
+    fields.push("error_message = ?");
+    values.push(String(patch.error_message));
+  }
+  if (fields.length === 0) return { ok: false, error: "no fields" };
+  values.push(String(intentId));
+  const info = db.prepare(`UPDATE swap_intents SET ${fields.join(", ")} WHERE intent_id = ?`).run(...values);
+  return { ok: info.changes === 1 };
+}
+
+export function compareAndSetSwapIntentStatus(intentId, fromStatus, toStatus) {
+  const info = db
+    .prepare(`UPDATE swap_intents SET status = ? WHERE intent_id = ? AND status = ?`)
+    .run(String(toStatus), String(intentId), String(fromStatus));
+  return { ok: info.changes === 1 };
+}
+
+export function getSwapAutopilotStats(walletPubkey) {
+  const wallet = String(walletPubkey || "").trim();
+  if (!wallet) return { ok: false, error: "wallet_pubkey required" };
+  const hour = db
+    .prepare(
+      `SELECT COUNT(*) AS n
+       FROM swap_intents
+       WHERE wallet_pubkey = ? AND created_at >= datetime('now','-1 hour')
+         AND status IN ('executing','simulated','succeeded','failed')`
+    )
+    .get(wallet)?.n;
+  const day = db
+    .prepare(
+      `SELECT COUNT(*) AS n
+       FROM swap_intents
+       WHERE wallet_pubkey = ? AND created_at >= datetime('now','-1 day')
+         AND status IN ('executing','simulated','succeeded','failed')`
+    )
+    .get(wallet)?.n;
+  // Daily SOL input volume (sum amount_in lamports for SOL input, succeeded/simulated/executing).
+  const SOL_MINT = "So11111111111111111111111111111111111111112";
+  const volLamports = db
+    .prepare(
+      `SELECT COALESCE(SUM(CAST(amount_in AS INTEGER)), 0) AS lamports
+       FROM swap_intents
+       WHERE wallet_pubkey = ? AND created_at >= datetime('now','-1 day')
+         AND input_mint = ?
+         AND status IN ('executing','simulated','succeeded')`
+    )
+    .get(wallet, SOL_MINT)?.lamports;
+  return {
+    ok: true,
+    swaps_last_hour: Number(hour) || 0,
+    swaps_last_day: Number(day) || 0,
+    sol_in_lamports_last_day: Number(volLamports) || 0,
+  };
+}
+
+export function getLastSwapCreatedAt(walletPubkey) {
+  const wallet = String(walletPubkey || "").trim();
+  if (!wallet) return null;
+  const row = db
+    .prepare(
+      `SELECT created_at
+       FROM swap_intents
+       WHERE wallet_pubkey = ?
+         AND status IN ('executing','simulated','succeeded','failed')
+       ORDER BY created_at DESC
+       LIMIT 1`
+    )
+    .get(wallet);
+  return row?.created_at || null;
 }
 
 const EXCERPT_LEN = 300;

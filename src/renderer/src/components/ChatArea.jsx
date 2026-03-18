@@ -5,6 +5,8 @@ import remarkGfm from "remark-gfm";
 import { useChatStore } from "../store/chatStore";
 
 const isUser = (role) => role === "user";
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 /** For display only: hide the embedded tool-results block so the bubble stays readable; full content is still sent to the API. */
 function getDisplayContent(content, role) {
@@ -56,6 +58,225 @@ function MessageContent({ content, role }) {
       >
         {displayContent}
       </ReactMarkdown>
+    </div>
+  );
+}
+
+function SwapIntentCard({ toolResults }) {
+  const apiBase = useChatStore((s) => s.apiBase);
+  const solanaNetwork = useChatStore((s) => s.solanaNetwork);
+  const base = apiBase || "";
+  const [stateByIntent, setStateByIntent] = useState({});
+  const [autopilot, setAutopilot] = useState({ enabled: false, autoExecute: false });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${base}/api/config`)
+      .then((r) => r.json())
+      .then((data) => {
+        const p = data?.config?.swapsPolicy;
+        if (cancelled || !p) return;
+        setAutopilot({ enabled: !!p.autopilotEnabled, autoExecute: !!p.autopilotAutoExecute });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [base]);
+
+  const intents = (toolResults || [])
+    .filter((tr) => tr?.tool === "jupiter_swap_prepare" && tr?.result && typeof tr.result === "object")
+    .map((tr) => tr.result)
+    .filter((r) => r?.ok && typeof r.intent_id === "string");
+
+  if (intents.length === 0) return null;
+
+  const confirm = async (intent_id) => {
+    setStateByIntent((s) => ({ ...s, [intent_id]: { ...(s[intent_id] || {}), confirming: true, error: null } }));
+    try {
+      const res = await fetch(`${base}/api/jupiter/swap/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intent_id }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Confirm failed");
+      setStateByIntent((s) => ({ ...s, [intent_id]: { confirming: false, confirmed: true, executing: false, executed: false, error: null, execResult: null } }));
+    } catch (e) {
+      setStateByIntent((s) => ({ ...s, [intent_id]: { confirming: false, confirmed: false, error: e.message || "Confirm failed" } }));
+    }
+  };
+
+  const execute = async (intent_id) => {
+    setStateByIntent((s) => ({ ...s, [intent_id]: { ...(s[intent_id] || {}), executing: true, error: null } }));
+    try {
+      const res = await fetch(`${base}/api/jupiter/swap/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intent_id }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Execute failed");
+      // Fetch intent telemetry for audit.
+      let telemetry = null;
+      try {
+        const ires = await fetch(`${base}/api/jupiter/swap/intent?intent_id=${encodeURIComponent(intent_id)}`);
+        const idata = await ires.json();
+        if (idata?.ok && idata.intent) telemetry = idata.intent;
+      } catch (_) {}
+      // Fetch post-swap balances for quick verification.
+      let balances = null;
+      try {
+        const bres = await fetch(`${base}/api/solana-wallet/balance`);
+        const bdata = await bres.json();
+        if (bdata?.ok) balances = bdata;
+      } catch (_) {}
+      setStateByIntent((s) => ({
+        ...s,
+        [intent_id]: { ...(s[intent_id] || {}), executing: false, executed: true, error: null, execResult: data, telemetry },
+      }));
+      if (balances) {
+        setStateByIntent((s) => ({
+          ...s,
+          [intent_id]: { ...(s[intent_id] || {}), balances },
+        }));
+      }
+    } catch (e) {
+      setStateByIntent((s) => ({ ...s, [intent_id]: { ...(s[intent_id] || {}), executing: false, executed: false, error: e.message || "Execute failed" } }));
+    }
+  };
+
+  const mintLabel = (m) => (m === SOL_MINT ? "SOL" : m === USDC_MINT ? "USDC" : m);
+  const solscanTxUrl = (sig) => {
+    if (!sig) return null;
+    const baseUrl = `https://solscan.io/tx/${encodeURIComponent(sig)}`;
+    if (solanaNetwork === "devnet") return `${baseUrl}?cluster=devnet`;
+    if (solanaNetwork === "testnet") return `${baseUrl}?cluster=testnet`;
+    return baseUrl;
+  };
+
+  return (
+    <div className="max-w-[80%] rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium uppercase tracking-wider text-amber-200/90">Swap intent requires confirmation</span>
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+            autopilot.enabled ? (autopilot.autoExecute ? "bg-amber-500/20 text-amber-200" : "bg-emerald-500/15 text-emerald-200") : "bg-white/5 text-slate-300"
+          }`}
+          title="Autopilot status"
+        >
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${
+              autopilot.enabled ? (autopilot.autoExecute ? "bg-amber-300" : "bg-emerald-300") : "bg-slate-500"
+            }`}
+          />
+          {autopilot.enabled ? (autopilot.autoExecute ? "Autopilot: Auto-exec" : "Autopilot: Confirm") : "Autopilot: Off"}
+        </span>
+      </div>
+      <div className="mt-2 space-y-2">
+        {intents.map((it) => {
+          const st = stateByIntent[it.intent_id] || {};
+          return (
+            <div key={it.intent_id} className="rounded-lg border border-amber-500/20 bg-black/20 p-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-mono text-amber-100 break-all">{it.intent_id}</div>
+                  <div className="mt-1 text-amber-200/80">
+                    {mintLabel(it.inputMint)} → {mintLabel(it.outputMint)} • in: <span className="font-mono">{it.inAmount}</span> • min out:{" "}
+                    <span className="font-mono">{it.minOutAmount}</span> • slippage: <span className="font-mono">{it.slippageBps}</span> bps
+                  </div>
+                  <div className="mt-1 text-amber-200/70">
+                    Expires: <span className="font-mono">{it.expires_at}</span>
+                  </div>
+                </div>
+                <div className="shrink-0 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    disabled={st.confirming || st.confirmed}
+                    onClick={() => confirm(it.intent_id)}
+                    className="rounded-lg bg-amber-500/80 hover:bg-amber-500 disabled:opacity-50 px-3 py-1.5 text-xs font-semibold text-black transition"
+                    title="Confirm this swap intent"
+                  >
+                    {st.confirmed ? "Confirmed" : st.confirming ? "Confirming…" : "Confirm"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!st.confirmed || st.executing || st.executed}
+                    onClick={() => execute(it.intent_id)}
+                    className="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-3 py-1.5 text-xs font-semibold text-white transition"
+                    title="Execute this confirmed intent (respects dry-run setting)"
+                  >
+                    {st.executed ? "Executed" : st.executing ? "Executing…" : "Execute"}
+                  </button>
+                </div>
+              </div>
+              {st.error && <div className="mt-2 text-xs text-red-200">Error: {st.error}</div>}
+              {st.confirmed && (
+                <div className="mt-2 text-xs text-amber-200/80">
+                  Confirmed. You can now Execute (typically in dry-run first).
+                </div>
+              )}
+              {st.execResult?.dry_run && st.execResult?.status === "simulated" && (
+                <div className="mt-2 text-xs text-emerald-200/80">Dry-run OK: simulated successfully (no broadcast).</div>
+              )}
+              {st.telemetry && (
+                <div className="mt-2 text-xs text-slate-200/80">
+                  <div>
+                    Telemetry:{" "}
+                    {st.telemetry.fee_lamports != null ? (
+                      <span className="font-mono">{st.telemetry.fee_lamports} lamports fee</span>
+                    ) : (
+                      <span className="font-mono">fee —</span>
+                    )}
+                    {" • "}
+                    {st.telemetry.units_consumed != null ? (
+                      <span className="font-mono">{st.telemetry.units_consumed} CU</span>
+                    ) : (
+                      <span className="font-mono">CU —</span>
+                    )}
+                  </div>
+                  {Array.isArray(st.telemetry.program_ids) && st.telemetry.program_ids.length > 0 && (
+                    <div className="mt-1">
+                      Programs: <span className="font-mono break-all">{st.telemetry.program_ids.join(", ")}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              {st.execResult?.signature && (
+                <div className="mt-2 text-xs text-emerald-200/80">
+                  Broadcast signature: <span className="font-mono break-all">{st.execResult.signature}</span>
+                </div>
+              )}
+              {st.execResult?.signature && (
+                <div className="mt-2 text-xs">
+                  <a
+                    href={solscanTxUrl(st.execResult.signature)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-emerald-300 hover:text-emerald-200 underline"
+                  >
+                    View on Solscan
+                  </a>
+                </div>
+              )}
+              {st.balances?.ok && (
+                <div className="mt-2 text-xs text-amber-200/80">
+                  Post-swap balances:{" "}
+                  <span className="font-mono">{Number(st.balances.sol ?? 0).toFixed(6)} SOL</span>
+                  {" • "}
+                  <span className="font-mono">
+                    {(() => {
+                      const usdc = (st.balances.tokens || []).find((t) => t.mint === USDC_MINT);
+                      const amt = usdc?.amount;
+                      return amt == null ? "USDC: —" : `USDC: ${amt}`;
+                    })()}
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -138,6 +359,9 @@ export default function ChatArea() {
                   ))}
                 </ul>
               </div>
+            )}
+            {m.role === "assistant" && m.tool_results && m.tool_results.length > 0 && (
+              <SwapIntentCard toolResults={m.tool_results} />
             )}
             <div className={`flex ${m.role === "user" ? "justify-end" : "justify-start"} w-full max-w-[80%]`}>
               <div

@@ -2,6 +2,17 @@ import { useState, useEffect, useCallback } from "react";
 import { useChatStore } from "../store/chatStore";
 
 const EXPLORER = "https://explorer.solana.com";
+const LOGOS_API = "https://logos.tradeloop.app/api/getLogos";
+
+const TOKEN_META_BY_MINT = {
+  // Common Solana tokens
+  EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: { symbol: "USDC", name: "USDC" },
+  Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: { symbol: "USDT", name: "USDT" }, // USDT (legacy mint)
+};
+
+const FALLBACK_LOGOS = {
+  USDT: "https://s2.coinmarketcap.com/static/img/coins/64x64/825.png",
+};
 
 /** Format SOL for balance display: always 4 decimal places, no scientific notation. */
 function formatSolBalance(n) {
@@ -38,6 +49,18 @@ function shortSignature(sig) {
   return `${sig.slice(0, 6)}…${sig.slice(-6)}`;
 }
 
+function formatTokenAmount(t) {
+  if (!t) return "—";
+  if (t.uiAmount != null && Number.isFinite(Number(t.uiAmount))) {
+    const n = Number(t.uiAmount);
+    if (n === 0) return "0";
+    if (n >= 1) return n.toLocaleString(undefined, { maximumFractionDigits: 6 });
+    return n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+  }
+  if (t.amount == null) return "—";
+  return String(t.amount);
+}
+
 export default function WalletPage({ onOpenSettings }) {
   const apiBase = useChatStore((s) => s.apiBase) || "";
   const setView = useChatStore((s) => s.setView);
@@ -51,6 +74,8 @@ export default function WalletPage({ onOpenSettings }) {
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState(null);
   const [solUsd, setSolUsd] = useState(null);
+  const [tokenPage, setTokenPage] = useState(0);
+  const [logoBySymbol, setLogoBySymbol] = useState({});
 
   const fetchConfig = useCallback(() => {
     fetch(`${apiBase}/api/config`)
@@ -103,6 +128,53 @@ export default function WalletPage({ onOpenSettings }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    // Reset pagination when token list changes.
+    setTokenPage(0);
+  }, [balance?.tokens?.length]);
+
+  useEffect(() => {
+    const tokens = balance?.tokens || [];
+    if (!Array.isArray(tokens) || tokens.length === 0) return;
+
+    const symbols = new Set(["SOL"]);
+    for (const t of tokens) {
+      const meta = t?.mint ? TOKEN_META_BY_MINT[t.mint] : null;
+      if (meta?.symbol) symbols.add(meta.symbol);
+    }
+    const payload = {
+      symbols: Array.from(symbols),
+      resolution: "64",
+      mode: "single",
+      parser: { enable: true, options: { removeNumbers: true } },
+    };
+
+    let cancelled = false;
+    fetch(LOGOS_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+      .then((r) => r.json())
+      .then((arr) => {
+        if (cancelled) return;
+        const next = {};
+        if (Array.isArray(arr)) {
+          for (const x of arr) {
+            if (x?.symbol && x?.png) next[String(x.symbol).toUpperCase()] = String(x.png);
+          }
+        }
+        // fallbacks for common tokens not present in API dataset
+        for (const [sym, url] of Object.entries(FALLBACK_LOGOS)) {
+          if (!next[sym]) next[sym] = url;
+        }
+        setLogoBySymbol(next);
+      })
+      .catch(() => {
+        if (!cancelled) setLogoBySymbol({ ...FALLBACK_LOGOS });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [balance?.tokens]);
 
   const hasWallet = config?.solanaWallet?.hasKeypair && (config.solanaWallet.publicKey || balance?.address);
   const address = config?.solanaWallet?.publicKey || balance?.address;
@@ -198,6 +270,33 @@ export default function WalletPage({ onOpenSettings }) {
             Back
           </button>
           <h1 className="text-xl font-semibold text-slate-200">Wallet</h1>
+          {config?.swapsPolicy && (
+            <span
+              className={`ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+                config.swapsPolicy.autopilotEnabled
+                  ? config.swapsPolicy.autopilotAutoExecute
+                    ? "bg-amber-500/20 text-amber-200 border border-amber-500/30"
+                    : "bg-emerald-500/15 text-emerald-200 border border-emerald-500/25"
+                  : "bg-white/5 text-slate-300 border border-white/10"
+              }`}
+              title="Autopilot status (Swaps)"
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  config.swapsPolicy.autopilotEnabled
+                    ? config.swapsPolicy.autopilotAutoExecute
+                      ? "bg-amber-300"
+                      : "bg-emerald-300"
+                    : "bg-slate-500"
+                }`}
+              />
+              {config.swapsPolicy.autopilotEnabled
+                ? config.swapsPolicy.autopilotAutoExecute
+                  ? "Autopilot: Auto-exec"
+                  : "Autopilot: Confirm"
+                : "Autopilot: Off"}
+            </span>
+          )}
         </div>
 
         {/* Address & SOL balance */}
@@ -227,7 +326,18 @@ export default function WalletPage({ onOpenSettings }) {
             <span className="text-2xl font-semibold text-slate-100 tabular-nums">
               {balance?.sol != null ? formatSolBalance(balance.sol) : "—"}
             </span>
-            <span className="text-slate-500 text-sm">SOL</span>
+            <span className="inline-flex items-center gap-1.5 text-slate-500 text-sm">
+              {logoBySymbol?.SOL && (
+                <img
+                  src={logoBySymbol.SOL}
+                  alt="Solana"
+                  className="w-4 h-4 rounded-sm"
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                />
+              )}
+              SOL
+            </span>
           </div>
           {balance?.sol != null && solUsd != null && (
             <p className="text-sm text-slate-400 mt-1 tabular-nums">
@@ -249,17 +359,101 @@ export default function WalletPage({ onOpenSettings }) {
         {/* Tokens (if any) */}
         {balance?.tokens?.length > 0 && (
           <section className="rounded-2xl border border-[#1e1e24] bg-[#121214] p-5">
-            <h2 className="text-sm font-medium text-slate-400 mb-3">Token accounts</h2>
-            <ul className="space-y-2">
-              {balance.tokens.map((t, i) => (
-                <li key={i} className="flex justify-between text-sm">
-                  <span className="font-mono text-slate-400 truncate max-w-[12rem]" title={t.mint}>
-                    {t.mint ? `${t.mint.slice(0, 8)}…` : "—"}
-                  </span>
-                  <span className="text-slate-200 tabular-nums">{formatSolBalance(t.amount)}</span>
-                </li>
-              ))}
-            </ul>
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <h2 className="text-sm font-medium text-slate-400">Token accounts</h2>
+              <span className="text-xs text-slate-500 tabular-nums">{balance.tokens.length} total</span>
+            </div>
+
+            {(() => {
+              const rows = (balance.tokens || []).map((t) => {
+                const mint = t?.mint || "";
+                const meta = mint ? TOKEN_META_BY_MINT[mint] : null;
+                const symbol = meta?.symbol || "";
+                return {
+                  mint,
+                  symbol,
+                  name: meta?.name || "",
+                  amountText: formatTokenAmount(t),
+                };
+              });
+              const pageSize = 10;
+              const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+              const page = Math.min(tokenPage, totalPages - 1);
+              const start = page * pageSize;
+              const viewRows = rows.slice(start, start + pageSize);
+
+              return (
+                <>
+                  <div className="max-h-72 overflow-y-auto rounded-xl border border-[#1e1e24]">
+                    <table className="w-full text-sm">
+                      <thead className="sticky top-0 bg-[#121214]">
+                        <tr className="text-xs uppercase tracking-wider text-slate-500">
+                          <th className="text-left px-3 py-2 font-medium">Token</th>
+                          <th className="text-right px-3 py-2 font-medium">Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {viewRows.map((r, idx) => {
+                          const logo = r.symbol ? logoBySymbol?.[r.symbol] : null;
+                          return (
+                            <tr key={`${r.mint}-${idx}`} className="border-t border-[#1e1e24]">
+                              <td className="px-3 py-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {logo ? (
+                                    <img
+                                      src={logo}
+                                      alt={r.symbol || "Token"}
+                                      className="w-5 h-5 rounded-sm shrink-0"
+                                      loading="lazy"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  ) : (
+                                    <div className="w-5 h-5 rounded-sm bg-white/10 shrink-0" />
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="text-slate-200 font-medium">
+                                      {r.symbol || (r.mint ? `${r.mint.slice(0, 4)}…${r.mint.slice(-4)}` : "—")}
+                                    </div>
+                                    <div className="text-xs text-slate-500 font-mono truncate" title={r.mint}>
+                                      {r.mint ? `${r.mint.slice(0, 8)}…${r.mint.slice(-6)}` : "—"}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 text-right text-slate-200 tabular-nums">{r.amountText}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <span className="text-xs text-slate-500 tabular-nums">
+                      Page {page + 1} / {totalPages}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTokenPage((p) => Math.max(0, p - 1))}
+                        disabled={page === 0}
+                        className="rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-slate-200 transition"
+                      >
+                        Prev
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTokenPage((p) => Math.min(totalPages - 1, p + 1))}
+                        disabled={page >= totalPages - 1}
+                        className="rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 px-3 py-1.5 text-xs font-medium text-slate-200 transition"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
           </section>
         )}
 

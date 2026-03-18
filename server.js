@@ -2,7 +2,7 @@ import { createServer } from "http";
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { join, extname, dirname } from "path";
 import { fileURLToPath } from "url";
-import { randomBytes, createCipheriv, createDecipheriv } from "crypto";
+import { randomBytes, createCipheriv, createDecipheriv, randomUUID } from "crypto";
 import { Keypair, Connection, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 import yaml from "js-yaml";
@@ -237,6 +237,30 @@ const PARAM_SCHEMAS = {
     },
     required: [],
   },
+  jupiter_swap_prepare: {
+    type: "object",
+    properties: {
+      input_mint: { type: "string", description: "Input token mint (default SOL)" },
+      output_mint: { type: "string", description: "Output token mint (default USDC)" },
+      amount: { type: "string", description: "Amount in smallest units (integer string)" },
+      slippage_bps: { type: "number", description: "Slippage in basis points (default 50)" },
+    },
+    required: ["amount"],
+  },
+  jupiter_swap_cancel: {
+    type: "object",
+    properties: {
+      intent_id: { type: "string", description: "Prepared or confirmed swap intent id to cancel" },
+    },
+    required: ["intent_id"],
+  },
+  jupiter_swap_execute: {
+    type: "object",
+    properties: {
+      intent_id: { type: "string", description: "Confirmed swap intent id to execute" },
+    },
+    required: ["intent_id"],
+  },
   drift_perp_price: {
     type: "object",
     properties: { market_index: { type: "number", description: "Perp market index (default 0 = SOL)" } },
@@ -308,9 +332,22 @@ const TOOLS = buildToolsFromRegistry(registry) ?? [
 
 const MAX_TOOL_TURNS = 5;
 
+// Swap lock: when true, block other high-risk tools while a swap is executing.
+let swapLock = { active: false, intent_id: null, started_at: 0 };
+
 function toolAllowedByTier(tier, name, args) {
   const t = clampSecurityTier(tier);
   if (t >= 4) return true;
+
+  // When swap lock is active, block high-risk tools even in operator tiers.
+  if (swapLock.active) {
+    if (name === "exec") return false;
+    if (name === "fetch_url") {
+      const m = String(args?.method || "GET").toUpperCase();
+      if (m === "POST") return false;
+    }
+    if (name === "solana_transfer" || name === "solana_transfer_spl") return false;
+  }
 
   // Always-OK: inspect/read-only tools (no writes, no external side effects).
   const alwaysAllow = new Set([
@@ -343,6 +380,9 @@ function toolAllowedByTier(tier, name, args) {
     "bet_positions",
   ]);
   if (alwaysAllow.has(name)) return true;
+
+  // Swap execution flow is Tier 4 only (sovereign funds movement capability).
+  if (name === "jupiter_swap_prepare" || name === "jupiter_swap_execute" || name === "jupiter_swap_cancel") return false;
 
   if (t === 1) {
     // Tier 1: safest defaults (no shell, no transfers, no mutation, no network POSTs, no background automation).
@@ -436,6 +476,12 @@ async function runTool(name, args, env) {
         return await jupiter.jupiterPrice(args, env);
       case "jupiter_quote":
         return await jupiter.jupiterQuote(args, env);
+      case "jupiter_swap_prepare":
+        return await prepareJupiterSwapIntent(args, env);
+      case "jupiter_swap_cancel":
+        return cancelJupiterSwapIntent(args);
+      case "jupiter_swap_execute":
+        return await executeJupiterSwapIntent(args, env);
       case "drift_perp_price":
         return await drift.driftPerpPrice(args, env);
       case "drift_positions":
@@ -466,6 +512,372 @@ async function runTool(name, args, env) {
     }
   } catch (e) {
     return { error: String(e.message) };
+  }
+}
+
+async function prepareJupiterSwapIntent(args, env) {
+  // Tier enforcement already handled in toolAllowedByTier.
+  const pubKey = getSolanaPublicKeyFromConfig();
+  if (!pubKey) return { ok: false, error: "Solana wallet not configured. Set/import wallet in Settings first." };
+
+  const policy = loadSwapPolicy();
+  if (!policy.enabled) {
+    return { ok: false, error: "Swaps are disabled. Enable swaps in Settings (Tier 4) to prepare a swap intent." };
+  }
+
+  const prepared = await jupiter.jupiterSwapPrepare(args, env);
+  if (!prepared?.ok) return prepared;
+
+  // Enforce mint allowlists (v1: SOL input + USDC output by default).
+  if (policy.allowedIn.length && !policy.allowedIn.includes(prepared.inputMint)) {
+    return { ok: false, error: "Input mint is not allowed by swap policy." };
+  }
+  if (policy.allowedOut.length && !policy.allowedOut.includes(prepared.outputMint)) {
+    return { ok: false, error: "Output mint is not allowed by swap policy." };
+  }
+  if (prepared.slippageBps > policy.maxSlippageBps) {
+    return { ok: false, error: `Requested slippage (${prepared.slippageBps} bps) exceeds policy max (${policy.maxSlippageBps} bps).` };
+  }
+
+  // Enforce caps for SOL input (amount is in lamports).
+  const SOL_MINT = "So11111111111111111111111111111111111111112";
+  if (prepared.inputMint === SOL_MINT) {
+    const amountLamports = BigInt(String(prepared.inAmount));
+    const maxLamports = BigInt(Math.floor(policy.maxSwapSol * 1_000_000_000));
+    if (amountLamports > maxLamports) {
+      return { ok: false, error: `Amount exceeds max swap size (${policy.maxSwapSol} SOL).` };
+    }
+    // Percent-of-balance cap.
+    const bal = await solana.solanaBalance({}, env);
+    if (bal?.ok && typeof bal.lamports === "number") {
+      const balanceLamports = BigInt(String(bal.lamports));
+      const maxPctLamports = (balanceLamports * BigInt(policy.maxSwapPct)) / BigInt(100);
+      if (amountLamports > maxPctLamports) {
+        return { ok: false, error: `Amount exceeds max swap percent of balance (${policy.maxSwapPct}%).` };
+      }
+    }
+  }
+
+  const intent_id = randomUUID();
+  const ttlMs = policy.intentTtlSeconds * 1000;
+  const expiresAt = new Date(Date.now() + ttlMs).toISOString();
+  const policySnapshot = {
+    // Snapshot so execution isn't affected by mid-flight config changes.
+    enabled: policy.enabled,
+    allowedIn: policy.allowedIn,
+    allowedOut: policy.allowedOut,
+    maxSlippageBps: policy.maxSlippageBps,
+    maxSwapSol: policy.maxSwapSol,
+    maxSwapPct: policy.maxSwapPct,
+    intentTtlSeconds: policy.intentTtlSeconds,
+    slippage_bps: prepared.slippageBps,
+    created_by: "jupiter_swap_prepare",
+    autopilotEnabled: policy.autopilotEnabled,
+  };
+  db.insertSwapIntent({
+    intent_id,
+    wallet_pubkey: pubKey,
+    input_mint: prepared.inputMint,
+    output_mint: prepared.outputMint,
+    amount_in: prepared.inAmount,
+    slippage_bps: prepared.slippageBps,
+    expected_out_amount: prepared.outAmount,
+    min_out_amount: prepared.minOutAmount,
+    quote_json: JSON.stringify(prepared.quote),
+    quote_hash: prepared.quote_hash,
+    policy_json: JSON.stringify(policySnapshot),
+    status: "prepared",
+    expires_at: expiresAt,
+  });
+
+  // Autopilot: optional auto-confirm (still Tier 4 only; still policy-checked; execution remains separately gated).
+  let autoConfirmed = false;
+  if (policy.autopilotEnabled) {
+    const upd = db.compareAndSetSwapIntentStatus(intent_id, "prepared", "confirmed");
+    autoConfirmed = !!upd.ok;
+  }
+
+  const out = {
+    ok: true,
+    intent_id,
+    wallet_pubkey: pubKey,
+    inputMint: prepared.inputMint,
+    outputMint: prepared.outputMint,
+    inAmount: prepared.inAmount,
+    outAmount: prepared.outAmount,
+    minOutAmount: prepared.minOutAmount,
+    slippageBps: prepared.slippageBps,
+    expires_at: expiresAt,
+    status: autoConfirmed ? "confirmed" : "prepared",
+    auto_confirmed: autoConfirmed,
+  };
+
+  // Optional auto-execute if enabled and broadcast gate is on (still respects dry-run).
+  if (autoConfirmed && policy.autopilotAutoExecute && policy.executionEnabled) {
+    const exec = await executeJupiterSwapIntent({ intent_id }, env);
+    return { ...out, auto_executed: !!exec.ok, execute_result: exec };
+  }
+
+  return out;
+}
+
+function cancelJupiterSwapIntent(args) {
+  const intentId = (args?.intent_id || args?.intentId || "").trim();
+  if (!intentId) return { ok: false, error: "intent_id is required" };
+  const intent = db.getSwapIntent(intentId);
+  if (!intent) return { ok: false, error: "Not found" };
+  if (intent.status !== "prepared" && intent.status !== "confirmed") {
+    return { ok: false, error: `Intent not cancellable from status '${intent.status}'` };
+  }
+  const upd = db.setSwapIntentStatus(intentId, "cancelled");
+  if (!upd.ok) return { ok: false, error: "Cancel failed" };
+  return { ok: true, intent_id: intentId, status: "cancelled" };
+}
+
+async function executeJupiterSwapIntent(args, env) {
+  const intentId = (args?.intent_id || args?.intentId || "").trim();
+  if (!intentId) return { ok: false, error: "intent_id is required" };
+
+  const policy = loadSwapPolicy();
+  if (!policy.executionEnabled) {
+    return { ok: false, error: "Swap execution is disabled. Set SWAPS_EXECUTION_ENABLED=true in Settings (Tier 4) to allow sending transactions." };
+  }
+
+  const intent = db.getSwapIntent(intentId);
+  if (!intent) return { ok: false, error: "Not found" };
+  if (intent.status !== "confirmed") return { ok: false, error: `Intent not executable from status '${intent.status}'` };
+
+  // Autopilot limits (also apply to manual execution for safety).
+  if (policy.cooldownSeconds > 0) {
+    const lastAt = db.getLastSwapCreatedAt(intent.wallet_pubkey);
+    if (lastAt) {
+      const lastMs = Date.parse(lastAt.endsWith("Z") ? lastAt : lastAt.replace(" ", "T") + "Z");
+      if (Number.isFinite(lastMs)) {
+        const elapsed = Math.floor((Date.now() - lastMs) / 1000);
+        if (elapsed >= 0 && elapsed < policy.cooldownSeconds) {
+          return { ok: false, error: `Cooldown active: wait ${policy.cooldownSeconds - elapsed}s` };
+        }
+      }
+    }
+  }
+  const stats = db.getSwapAutopilotStats(intent.wallet_pubkey);
+  if (stats?.ok) {
+    if (policy.maxSwapsPerHour > 0 && stats.swaps_last_hour >= policy.maxSwapsPerHour) {
+      return { ok: false, error: `Swap rate limit: max ${policy.maxSwapsPerHour}/hour` };
+    }
+    if (policy.maxSwapsPerDay > 0 && stats.swaps_last_day >= policy.maxSwapsPerDay) {
+      return { ok: false, error: `Swap rate limit: max ${policy.maxSwapsPerDay}/day` };
+    }
+    const SOL_LAMPORTS_PER = 1_000_000_000;
+    const maxDailyLamports = BigInt(Math.floor(policy.maxDailySwapSolVolume * SOL_LAMPORTS_PER));
+    if (maxDailyLamports > 0n && BigInt(String(stats.sol_in_lamports_last_day || 0)) >= maxDailyLamports) {
+      return { ok: false, error: `Daily SOL swap volume cap reached (${policy.maxDailySwapSolVolume} SOL)` };
+    }
+  }
+
+  const expiresMs = Date.parse(intent.expires_at);
+  if (Number.isFinite(expiresMs) && Date.now() > expiresMs) {
+    db.setSwapIntentStatus(intentId, "expired");
+    return { ok: false, error: "Intent expired" };
+  }
+
+  // One-at-a-time: mark executing if still confirmed.
+  const locked = db.compareAndSetSwapIntentStatus(intentId, "confirmed", "executing");
+  if (!locked.ok) return { ok: false, error: "Intent is not in a confirmable state (possibly already executing)." };
+
+  try {
+    if (swapLock.active) throw new Error("Another swap is currently executing");
+    swapLock = { active: true, intent_id: intentId, started_at: Date.now() };
+
+    const pubKey = getSolanaPublicKeyFromConfig();
+    const kp = getSolanaKeypairFromConfig();
+    if (!pubKey || !kp?.privateKeyBase58) throw new Error("Solana wallet not configured");
+
+    // Re-quote check (same mints, amount, slippage) to detect large moves.
+    const rq = await jupiter.jupiterSwapPrepare(
+      {
+        input_mint: intent.input_mint,
+        output_mint: intent.output_mint,
+        amount: intent.amount_in,
+        slippage_bps: intent.slippage_bps,
+      },
+      env
+    );
+    if (!rq?.ok) throw new Error(rq?.error || "Re-quote failed");
+    const expectedOutNow = BigInt(String(rq.outAmount));
+    const expectedOutOld = BigInt(String(intent.expected_out_amount));
+    if (expectedOutOld > 0n) {
+      const diff = expectedOutOld > expectedOutNow ? expectedOutOld - expectedOutNow : expectedOutNow - expectedOutOld;
+      const diffBps = Number((diff * 10_000n) / expectedOutOld);
+      if (diffBps > policy.maxRequoteDeviationBps) {
+        throw new Error(`Re-quote deviation too high (${diffBps} bps > ${policy.maxRequoteDeviationBps} bps). Prepare a new intent.`);
+      }
+    }
+
+    const quote = JSON.parse(intent.quote_json);
+    const built = await jupiter.jupiterSwapBuildTx({ quote, userPublicKey: pubKey }, env);
+    if (!built?.ok) throw new Error(built?.error || "Swap tx build failed");
+
+    const { Connection, Keypair, VersionedTransaction } = await import("@solana/web3.js");
+    const conn = new Connection(process.env.SOLANA_RPC_URL || env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com", {
+      commitment: "confirmed",
+    });
+
+    const raw = Buffer.from(String(built.swapTransaction), "base64");
+    const tx = VersionedTransaction.deserialize(raw);
+
+    const resolveAccountKeys = async () => {
+      const lookups = tx.message.addressTableLookups || [];
+      if (!lookups.length) {
+        // Legacy/static-only keys.
+        return tx.message.getAccountKeys();
+      }
+      const { AddressLookupTableAccount } = await import("@solana/web3.js");
+      const tables = [];
+      for (const l of lookups) {
+        try {
+          const r = await conn.getAddressLookupTable(l.accountKey);
+          const alt = r?.value;
+          if (alt) tables.push(alt instanceof AddressLookupTableAccount ? alt : alt);
+        } catch (_) {}
+      }
+      return tx.message.getAccountKeys({ addressLookupTableAccounts: tables });
+    };
+
+    const keys = await resolveAccountKeys();
+    const compiled = tx.message.compiledInstructions || tx.message.instructions || [];
+    const programIds = (() => {
+      const out = new Set();
+      for (const ix of compiled) {
+        const idx = Number(ix.programIdIndex);
+        const k = Number.isFinite(idx) ? keys.get(idx) : null;
+        if (k) out.add(k.toBase58());
+      }
+      return Array.from(out);
+    })();
+    const programIdsDebug = {
+      programIds,
+      compiledInstructionCount: Array.isArray(compiled) ? compiled.length : 0,
+      staticKeysLen: (tx.message.staticAccountKeys || keys.staticAccountKeys || []).length,
+      lookupCount: (tx.message.addressTableLookups || []).length,
+    };
+
+    if (policy.allowedProgramIds?.length) {
+      const allowed = new Set(policy.allowedProgramIds);
+      const unknown = programIds.filter((p) => !allowed.has(p));
+      if (unknown.length) {
+        throw new Error(`Swap tx contains disallowed program(s): ${unknown.join(", ")}`);
+      }
+    }
+    const signer = Keypair.fromSecretKey(bs58.decode(kp.privateKeyBase58));
+    tx.sign([signer]);
+
+    // Bound fee + compute before any send.
+    const feeInfo = await conn.getFeeForMessage(tx.message).catch(() => null);
+    const feeLamports = feeInfo?.value != null ? Number(feeInfo.value) : null;
+    if (feeLamports != null && Number.isFinite(feeLamports) && feeLamports > policy.maxTxFeeLamports) {
+      throw new Error(`Fee too high (${feeLamports} lamports > ${policy.maxTxFeeLamports})`);
+    }
+
+    // Mandatory simulation + min-out enforcement (output token delta).
+    let outAta = null;
+    let outPre = 0n;
+    try {
+      const { getAssociatedTokenAddressSync } = await import("@solana/spl-token");
+      outAta = getAssociatedTokenAddressSync(new PublicKey(intent.output_mint), new PublicKey(pubKey));
+      const bal = await conn.getTokenAccountBalance(outAta).catch(() => null);
+      if (bal?.value?.amount != null) outPre = BigInt(String(bal.value.amount));
+    } catch (_) {}
+
+    const SOL_MINT = "So11111111111111111111111111111111111111112";
+    const inIsSol = intent.input_mint === SOL_MINT;
+    const inAmount = BigInt(String(intent.amount_in));
+    const solPre = inIsSol ? BigInt(String(await conn.getBalance(new PublicKey(pubKey)).catch(() => 0))) : null;
+
+    const sim = await conn.simulateTransaction(tx, {
+      sigVerify: true,
+      commitment: "processed",
+      accounts: outAta
+        ? { addresses: [outAta.toBase58(), pubKey], encoding: "base64" }
+        : undefined,
+    });
+    if (sim.value?.err) {
+      throw new Error(`Simulation failed: ${JSON.stringify(sim.value.err)}`);
+    }
+    const units = sim.value?.unitsConsumed != null ? Number(sim.value.unitsConsumed) : null;
+    if (units != null && Number.isFinite(units) && units > policy.maxComputeUnits) {
+      throw new Error(`Compute too high (${units} > ${policy.maxComputeUnits})`);
+    }
+
+    // Input-side spend bounds for SOL input: post SOL must not decrease beyond amount_in + fee + extra buffer.
+    if (inIsSol && solPre != null) {
+      const accounts = Array.isArray(sim.value?.accounts) ? sim.value.accounts : null;
+      const payerAcct = accounts && accounts.length >= 2 ? accounts[1] : null;
+      const postLamports = payerAcct?.lamports != null ? BigInt(String(payerAcct.lamports)) : null;
+      if (postLamports == null) throw new Error("Simulation did not return payer account lamports");
+      const spent = solPre > postLamports ? solPre - postLamports : 0n;
+      const fee = BigInt(String(feeLamports || 0));
+      const extra = BigInt(String(policy.maxExtraSolLamports || 0));
+      const maxSpend = inAmount + fee + extra;
+      if (spent > maxSpend) throw new Error(`SOL spend too high in simulation (${spent} > ${maxSpend})`);
+      if (spent < inAmount) throw new Error(`SOL spend too low in simulation (${spent} < ${inAmount})`);
+    }
+
+    if (outAta) {
+      const acct = Array.isArray(sim.value?.accounts) ? sim.value.accounts[0] : null;
+      const dataArr = acct?.data;
+      const b64 = Array.isArray(dataArr) ? dataArr[0] : null;
+      if (typeof b64 !== "string" || !b64) throw new Error("Simulation did not return output token account data");
+      const buf = Buffer.from(b64, "base64");
+      // SPL token account layout: amount at offset 64 (u64 LE).
+      if (buf.length < 72) throw new Error("Output token account data too short");
+      const post = buf.readBigUInt64LE(64);
+      const delta = post > outPre ? post - outPre : 0n;
+      const minOut = BigInt(String(intent.min_out_amount));
+      if (delta < minOut) throw new Error(`Min-out not satisfied in simulation (delta ${delta} < min ${minOut})`);
+    }
+
+    if (policy.executionDryRun) {
+      db.setSwapIntentResult(intentId, {
+        status: "simulated",
+        signature: "",
+        fee_lamports: feeLamports ?? null,
+        units_consumed: units ?? null,
+        program_ids_json: JSON.stringify(programIdsDebug.programIds || []),
+        error_code: "",
+        error_message: "",
+      });
+      return {
+        ok: true,
+        intent_id: intentId,
+        status: "simulated",
+        dry_run: true,
+        feeLamports,
+        unitsConsumed: units,
+        programIds: programIdsDebug.programIds,
+        debug: { compiledInstructionCount: programIdsDebug.compiledInstructionCount, staticKeysLen: programIdsDebug.staticKeysLen },
+      };
+    }
+
+    const sig = await conn.sendTransaction(tx, { skipPreflight: true, maxRetries: 3 });
+    const conf = await conn.confirmTransaction(sig, "confirmed");
+    if (conf.value?.err) throw new Error(`Transaction failed: ${JSON.stringify(conf.value.err)}`);
+
+    db.setSwapIntentResult(intentId, {
+      status: "succeeded",
+      signature: sig,
+      fee_lamports: feeLamports ?? null,
+      units_consumed: units ?? null,
+      program_ids_json: JSON.stringify(programIdsDebug.programIds || []),
+      error_code: "",
+      error_message: "",
+    });
+    return { ok: true, intent_id: intentId, status: "succeeded", signature: sig };
+  } catch (e) {
+    db.setSwapIntentResult(intentId, { status: "failed", error_code: "EXECUTION_FAILED", error_message: e.message || String(e) });
+    return { ok: false, intent_id: intentId, status: "failed", error: e.message || String(e) };
+  } finally {
+    if (swapLock.intent_id === intentId) swapLock = { active: false, intent_id: null, started_at: 0 };
   }
 }
 
@@ -569,12 +981,106 @@ function ensureDefaultConfigKey(key, plaintextValue) {
 let apiKey = loadConfigKey("INCEPTION_API_KEY") || process.env.INCEPTION_API_KEY || env.INCEPTION_API_KEY || null;
 let veniceApiKey = loadConfigKey("VENICE_ADMIN_KEY") || process.env.VENICE_ADMIN_KEY || env.VENICE_ADMIN_KEY || null;
 let nanogptApiKey = loadConfigKey("NANOGPT_API_KEY") || process.env.NANOGPT_API_KEY || env.NANOGPT_API_KEY || null;
+let jupiterApiKey = loadConfigKey("JUPITER_API_KEY") || process.env.JUPITER_API_KEY || env.JUPITER_API_KEY || null;
 let chatBackend = (loadConfigKey("CHAT_BACKEND") || process.env.CHAT_BACKEND || env.CHAT_BACKEND || "").toLowerCase();
 if (chatBackend !== "venice" && chatBackend !== "nanogpt" && chatBackend !== "inception") chatBackend = "nanogpt";
 
 // Hardening tier (1..4). Stored in config table; defaults to tier 1.
 ensureDefaultConfigKey("SECURITY_TIER", "1");
 let securityTier = clampSecurityTier(loadConfigKey("SECURITY_TIER") ?? "1");
+
+// Swap policy defaults (stored in config table; values are plaintext before encryption).
+ensureDefaultConfigKey("SWAPS_ENABLED", "false");
+ensureDefaultConfigKey("SWAPS_ALLOWED_OUTPUT_MINTS", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"); // USDC
+ensureDefaultConfigKey("SWAPS_ALLOWED_INPUT_MINTS", "So11111111111111111111111111111111111111112"); // SOL
+ensureDefaultConfigKey("SWAPS_MAX_SLIPPAGE_BPS", "50");
+ensureDefaultConfigKey("SWAPS_MAX_SWAP_SOL", "0.05");
+ensureDefaultConfigKey("SWAPS_MAX_SWAP_PCT_BALANCE", "20");
+ensureDefaultConfigKey("SWAPS_INTENT_TTL_SECONDS", "180");
+ensureDefaultConfigKey("SWAPS_EXECUTION_ENABLED", "false");
+ensureDefaultConfigKey("SWAPS_MAX_REQUOTE_DEVIATION_BPS", "150");
+ensureDefaultConfigKey("SWAPS_EXECUTION_DRY_RUN", "true");
+ensureDefaultConfigKey("SWAPS_MAX_TX_FEE_LAMPORTS", "50000");
+ensureDefaultConfigKey("SWAPS_MAX_COMPUTE_UNITS", "1400000");
+ensureDefaultConfigKey("SWAPS_MAX_EXTRA_SOL_LAMPORTS", "3000000");
+ensureDefaultConfigKey(
+  "SWAPS_ALLOWED_PROGRAM_IDS",
+  [
+    "ComputeBudget111111111111111111111111111111",
+    "11111111111111111111111111111111",
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+    "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+  ].join(",")
+);
+
+// Autopilot (explicit opt-in). Still enforced by deterministic server-side limits.
+ensureDefaultConfigKey("SWAPS_AUTOPILOT_ENABLED", "false");
+ensureDefaultConfigKey("SWAPS_AUTOPILOT_AUTO_EXECUTE", "false");
+ensureDefaultConfigKey("SWAPS_COOLDOWN_SECONDS", "60");
+ensureDefaultConfigKey("SWAPS_MAX_SWAPS_PER_HOUR", "3");
+ensureDefaultConfigKey("SWAPS_MAX_SWAPS_PER_DAY", "10");
+ensureDefaultConfigKey("SWAPS_MAX_DAILY_SWAP_SOL_VOLUME", "0.2");
+
+function parseBool(s, defaultValue = false) {
+  if (s == null) return defaultValue;
+  const v = String(s).trim().toLowerCase();
+  if (v === "true" || v === "1" || v === "yes" || v === "on") return true;
+  if (v === "false" || v === "0" || v === "no" || v === "off") return false;
+  return defaultValue;
+}
+
+function parseCsv(s) {
+  return String(s || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function loadSwapPolicy() {
+  const enabled = parseBool(loadConfigKey("SWAPS_ENABLED") ?? "false", false);
+  const allowedOut = parseCsv(loadConfigKey("SWAPS_ALLOWED_OUTPUT_MINTS") ?? "");
+  const allowedIn = parseCsv(loadConfigKey("SWAPS_ALLOWED_INPUT_MINTS") ?? "");
+  const maxSlippageBps = Math.max(1, Math.min(Number(loadConfigKey("SWAPS_MAX_SLIPPAGE_BPS") ?? "50") || 50, 5000));
+  const maxSwapSol = Number(loadConfigKey("SWAPS_MAX_SWAP_SOL") ?? "0.05") || 0.05;
+  const maxSwapPct = Math.max(1, Math.min(Number(loadConfigKey("SWAPS_MAX_SWAP_PCT_BALANCE") ?? "20") || 20, 100));
+  const intentTtlSeconds = Math.max(30, Math.min(Number(loadConfigKey("SWAPS_INTENT_TTL_SECONDS") ?? "180") || 180, 3600));
+  const executionEnabled = parseBool(loadConfigKey("SWAPS_EXECUTION_ENABLED") ?? "false", false);
+  const maxRequoteDeviationBps = Math.max(1, Math.min(Number(loadConfigKey("SWAPS_MAX_REQUOTE_DEVIATION_BPS") ?? "150") || 150, 5000));
+  const executionDryRun = parseBool(loadConfigKey("SWAPS_EXECUTION_DRY_RUN") ?? "true", true);
+  const maxTxFeeLamports = Math.max(1_000, Math.min(Number(loadConfigKey("SWAPS_MAX_TX_FEE_LAMPORTS") ?? "10000") || 10000, 1_000_000));
+  const maxComputeUnits = Math.max(200_000, Math.min(Number(loadConfigKey("SWAPS_MAX_COMPUTE_UNITS") ?? "1400000") || 1_400_000, 3_000_000));
+  const maxExtraSolLamports = Math.max(0, Math.min(Number(loadConfigKey("SWAPS_MAX_EXTRA_SOL_LAMPORTS") ?? "3000000") || 3_000_000, 50_000_000));
+  const allowedProgramIds = parseCsv(loadConfigKey("SWAPS_ALLOWED_PROGRAM_IDS") ?? "");
+  const autopilotEnabled = parseBool(loadConfigKey("SWAPS_AUTOPILOT_ENABLED") ?? "false", false);
+  const autopilotAutoExecute = parseBool(loadConfigKey("SWAPS_AUTOPILOT_AUTO_EXECUTE") ?? "false", false);
+  const cooldownSeconds = Math.max(0, Math.min(Number(loadConfigKey("SWAPS_COOLDOWN_SECONDS") ?? "60") || 60, 86400));
+  const maxSwapsPerHour = Math.max(0, Math.min(Number(loadConfigKey("SWAPS_MAX_SWAPS_PER_HOUR") ?? "3") || 3, 1000));
+  const maxSwapsPerDay = Math.max(0, Math.min(Number(loadConfigKey("SWAPS_MAX_SWAPS_PER_DAY") ?? "10") || 10, 1000));
+  const maxDailySwapSolVolume = Math.max(0, Number(loadConfigKey("SWAPS_MAX_DAILY_SWAP_SOL_VOLUME") ?? "0.2") || 0.2);
+  return {
+    enabled,
+    allowedOut,
+    allowedIn,
+    maxSlippageBps,
+    maxSwapSol,
+    maxSwapPct,
+    intentTtlSeconds,
+    executionEnabled,
+    maxRequoteDeviationBps,
+    executionDryRun,
+    maxTxFeeLamports,
+    maxComputeUnits,
+    maxExtraSolLamports,
+    allowedProgramIds,
+    autopilotEnabled,
+    autopilotAutoExecute,
+    cooldownSeconds,
+    maxSwapsPerHour,
+    maxSwapsPerDay,
+    maxDailySwapSolVolume,
+  };
+}
 
 // Solana network RPC URLs (default: testnet)
 const SOLANA_NETWORK_URLS = {
@@ -605,6 +1111,7 @@ let configDataDir = loadConfigKey("DATA_DIR") ?? process.env.DATA_DIR ?? env.DAT
 if (configSolanaRpc) process.env.SOLANA_RPC_URL = configSolanaRpc;
 if (configWorkspaceDir) process.env.WORKSPACE_DIR = configWorkspaceDir;
 if (configDataDir) process.env.DATA_DIR = configDataDir;
+if (jupiterApiKey) process.env.JUPITER_API_KEY = jupiterApiKey;
 
 /** Resolved server port (config > env > default). */
 let port = Number(configPort) || 3333;
@@ -930,6 +1437,28 @@ const server = createServer(async (req, res) => {
       JSON.stringify({
         config: {
           securityTier,
+          swapsPolicy: {
+            enabled: loadSwapPolicy().enabled,
+            allowedInputMints: loadSwapPolicy().allowedIn,
+            allowedOutputMints: loadSwapPolicy().allowedOut,
+            maxSlippageBps: loadSwapPolicy().maxSlippageBps,
+            maxSwapSol: loadSwapPolicy().maxSwapSol,
+            maxSwapPctBalance: loadSwapPolicy().maxSwapPct,
+            intentTtlSeconds: loadSwapPolicy().intentTtlSeconds,
+            executionEnabled: loadSwapPolicy().executionEnabled,
+            executionDryRun: loadSwapPolicy().executionDryRun,
+            maxRequoteDeviationBps: loadSwapPolicy().maxRequoteDeviationBps,
+            maxTxFeeLamports: loadSwapPolicy().maxTxFeeLamports,
+            maxComputeUnits: loadSwapPolicy().maxComputeUnits,
+            maxExtraSolLamports: loadSwapPolicy().maxExtraSolLamports,
+            allowedProgramIds: loadSwapPolicy().allowedProgramIds,
+            autopilotEnabled: loadSwapPolicy().autopilotEnabled,
+            autopilotAutoExecute: loadSwapPolicy().autopilotAutoExecute,
+            cooldownSeconds: loadSwapPolicy().cooldownSeconds,
+            maxSwapsPerHour: loadSwapPolicy().maxSwapsPerHour,
+            maxSwapsPerDay: loadSwapPolicy().maxSwapsPerDay,
+            maxDailySwapSolVolume: loadSwapPolicy().maxDailySwapSolVolume,
+          },
           chatBackend,
           INCEPTION_API_KEY: {
             status: apiKey ? "CONNECTED" : "NOT_CONFIGURED",
@@ -942,6 +1471,10 @@ const server = createServer(async (req, res) => {
           NANOGPT_API_KEY: {
             status: nanogptStatus,
             masked: nanogptMasked,
+          },
+          JUPITER_API_KEY: {
+            status: jupiterApiKey ? "CONNECTED" : "NOT_CONFIGURED",
+            masked: jupiterApiKey ? masked(jupiterApiKey) : null,
           },
           solanaWallet: {
             hasKeypair,
@@ -1130,6 +1663,190 @@ const server = createServer(async (req, res) => {
     }
     return;
   }
+  if (path === "/api/jupiter/swap/prepare" && req.method === "POST") {
+    const remote = req.socket.remoteAddress || "";
+    if (remote !== "127.0.0.1" && remote !== "::1" && !remote.endsWith("127.0.0.1")) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+      return;
+    }
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    try {
+      const data = JSON.parse(body || "{}");
+      const out = await prepareJupiterSwapIntent(data, loadEnv());
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(out));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message || String(e) }));
+    }
+    return;
+  }
+  if (path === "/api/jupiter/swap/intent" && req.method === "GET") {
+    const remote = req.socket.remoteAddress || "";
+    if (remote !== "127.0.0.1" && remote !== "::1" && !remote.endsWith("127.0.0.1")) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+      return;
+    }
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const intentId = (url.searchParams.get("intent_id") || "").trim();
+    if (!intentId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "intent_id is required" }));
+      return;
+    }
+    const intent = db.getSwapIntent(intentId);
+    if (!intent) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Not found" }));
+      return;
+    }
+    // Return a safe subset; quote_json can be large and is not needed for UX.
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        intent: {
+          intent_id: intent.intent_id,
+          wallet_pubkey: intent.wallet_pubkey,
+          input_mint: intent.input_mint,
+          output_mint: intent.output_mint,
+          amount_in: intent.amount_in,
+          slippage_bps: intent.slippage_bps,
+          expected_out_amount: intent.expected_out_amount,
+          min_out_amount: intent.min_out_amount,
+          quote_hash: intent.quote_hash,
+          policy_json: intent.policy_json,
+          status: intent.status,
+          created_at: intent.created_at,
+          expires_at: intent.expires_at,
+          signature: intent.signature || null,
+          fee_lamports: intent.fee_lamports ?? null,
+          units_consumed: intent.units_consumed ?? null,
+          program_ids: (() => {
+            try {
+              return intent.program_ids_json ? JSON.parse(intent.program_ids_json) : null;
+            } catch (_) {
+              return null;
+            }
+          })(),
+        },
+      })
+    );
+    return;
+  }
+  if (path === "/api/jupiter/swap/confirm" && req.method === "POST") {
+    const remote = req.socket.remoteAddress || "";
+    if (remote !== "127.0.0.1" && remote !== "::1" && !remote.endsWith("127.0.0.1")) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+      return;
+    }
+    if (clampSecurityTier(securityTier) < 4) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Requires security tier 4" }));
+      return;
+    }
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    let data;
+    try {
+      data = JSON.parse(body || "{}");
+    } catch (_) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Invalid JSON" }));
+      return;
+    }
+    const intentId = (data.intent_id || data.intentId || "").trim();
+    if (!intentId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "intent_id is required" }));
+      return;
+    }
+    const intent = db.getSwapIntent(intentId);
+    if (!intent) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Not found" }));
+      return;
+    }
+    if (intent.status !== "prepared") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: `Intent not confirmable from status '${intent.status}'` }));
+      return;
+    }
+    const expiresMs = Date.parse(intent.expires_at);
+    if (Number.isFinite(expiresMs) && Date.now() > expiresMs) {
+      db.setSwapIntentStatus(intentId, "expired");
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Intent expired" }));
+      return;
+    }
+    const upd = db.setSwapIntentStatus(intentId, "confirmed");
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: !!upd.ok, intent_id: intentId, status: "confirmed" }));
+    return;
+  }
+  if (path === "/api/jupiter/swap/cancel" && req.method === "POST") {
+    const remote = req.socket.remoteAddress || "";
+    if (remote !== "127.0.0.1" && remote !== "::1" && !remote.endsWith("127.0.0.1")) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+      return;
+    }
+    if (clampSecurityTier(securityTier) < 4) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Requires security tier 4" }));
+      return;
+    }
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    let data;
+    try {
+      data = JSON.parse(body || "{}");
+    } catch (_) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Invalid JSON" }));
+      return;
+    }
+    const out = cancelJupiterSwapIntent(data);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(out));
+    return;
+  }
+  if (path === "/api/jupiter/swap/execute" && req.method === "POST") {
+    const remote = req.socket.remoteAddress || "";
+    if (remote !== "127.0.0.1" && remote !== "::1" && !remote.endsWith("127.0.0.1")) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+      return;
+    }
+    if (clampSecurityTier(securityTier) < 4) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Requires security tier 4" }));
+      return;
+    }
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    let data;
+    try {
+      data = JSON.parse(body || "{}");
+    } catch (_) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Invalid JSON" }));
+      return;
+    }
+    try {
+      const out = await executeJupiterSwapIntent(data, loadEnv());
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(out));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message || String(e) }));
+    }
+    return;
+  }
   if (path === "/api/config" && req.method === "POST") {
     const remote = req.socket.remoteAddress || "";
     if (remote !== "127.0.0.1" && remote !== "::1" && !remote.endsWith("127.0.0.1")) {
@@ -1187,6 +1904,20 @@ const server = createServer(async (req, res) => {
           db.setConfig(key, encrypt(""));
         }
         nanogptApiKey = value || null;
+      } else if (key === "JUPITER_API_KEY") {
+        if (value) {
+          const enc = encrypt(value);
+          if (!enc) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Encryption failed" }));
+            return;
+          }
+          db.setConfig(key, enc);
+        } else {
+          db.setConfig(key, encrypt(""));
+        }
+        jupiterApiKey = value || null;
+        if (jupiterApiKey) process.env.JUPITER_API_KEY = jupiterApiKey;
       } else if (key === "CHAT_BACKEND") {
         const v = (value || "").toLowerCase();
         if (v === "venice" || v === "inception" || v === "nanogpt") {

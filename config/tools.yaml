@@ -221,6 +221,26 @@ tools:
     handler: jupiterQuote
     enabled: true
 
+  - name: jupiter_swap_prepare
+    description: |
+      Prepare a sovereign Jupiter swap intent (no execution). Fetches a fresh Metis quote and returns a quote snapshot
+      including expected out and min-out. Intended for Tier 4 execution flows where execution is bound to a stored intent.
+      Requires `JUPITER_API_KEY` (sent as x-api-key) when calling api.jup.ag.
+    module: ./tools/jupiter.js
+    handler: jupiterSwapPrepare
+    enabled: true
+
+  - name: jupiter_swap_cancel
+    description: |
+      Cancel a prepared/confirmed Jupiter swap intent by intent_id. This does not move funds; it prevents execution.
+      Tier 4 only.
+    enabled: true
+
+  - name: jupiter_swap_execute
+    description: |
+      Execute a previously confirmed Jupiter swap intent by intent_id (Tier 4 only). Not enabled until execution is implemented.
+    enabled: true
+
   - name: drift_perp_price
     description: Get SOL-PERP mark price (USD). Uses Jupiter SOL price as proxy. Optional market_index (default 0).
     module: ./tools/drift.js

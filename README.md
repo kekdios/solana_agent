@@ -23,7 +23,11 @@ A dedicated website for Solana Agent is at **https://solanaagent.app**.
    ```
    NANOGPT_API_KEY=your_nanogpt_key_here
    ```
-   **Optional:** `INCEPTION_API_KEY` and `VENICE_ADMIN_KEY` for other providers; `CHAT_BACKEND=nanogpt|inception|venice` to choose (default is `nanogpt`). **Optional (Solana):** `SOLANA_RPC_URL`; wallet can be generated or imported in Settings. All of these (and PORT, HOST, HEARTBEAT_INTERVAL_MS, WORKSPACE_DIR, DATA_DIR) can be stored in the **config table** via Settings → Environment; .env is fallback only. See **TOOLS.md**.
+   **Optional:** `INCEPTION_API_KEY` and `VENICE_ADMIN_KEY` for other providers; `CHAT_BACKEND=nanogpt|inception|venice` to choose (default is `nanogpt`).
+
+   **For Jupiter swaps:** set `JUPITER_API_KEY` (also configurable in Settings; stored encrypted in the config table).
+
+   **Optional (Solana):** `SOLANA_RPC_URL`; wallet can be generated or imported in Settings. All of these (and PORT, HOST, HEARTBEAT_INTERVAL_MS, WORKSPACE_DIR, DATA_DIR) can be stored in the **config table** via Settings → Environment; .env is fallback only. See **TOOLS.md**.
 
 3. Run the server:
    ```bash
@@ -73,6 +77,14 @@ When you run the Electron app, all writable data (solagent.db, .env copy, worksp
 - `node scripts/test-solana-tools.js` — runs Solana tool handlers (requires wallet in config or `SOLANA_PRIVATE_KEY` in .env; transfer test sends 0.001 SOL to a test address).
 
 **Settings (gear icon):** Choose **Chat provider** (NanoGPT default, Inception, or Venice) and set **NanoGPT API key**, **Inception API key**, and/or **Venice API key** (stored encrypted). Manage **Solana wallet** (view/copy public key, reveal private key, generate wallet, passphrase backup). **Environment** — set PORT, HOST, SOLANA_RPC_URL, HEARTBEAT_INTERVAL_MS, WORKSPACE_DIR, DATA_DIR in the config table (overrides .env; PORT/HOST apply after restart). **Clear all conversation history** — removes all chats, messages, token usage, and saved sessions; confirm before running.
+
+**Swaps (Jupiter):** In Settings → Swaps you can configure policy (allowlists/caps), execution gating, and optional autopilot:
+- `SWAPS_ENABLED` must be on to prepare intents.
+- `SWAPS_EXECUTION_ENABLED` must be on to broadcast swaps (keep off unless intended).
+- `SWAPS_EXECUTION_DRY_RUN` simulates only (no broadcast).
+- **Autopilot** can auto-confirm (and optionally auto-execute) swaps that satisfy strict rate/volume limits.
+
+**Wallet page:** Shows address + SOL balance, and a paginated token table (10 rows/page) with logos for common tokens (e.g. SOL/USDC) pulled from `https://logos.tradeloop.app/`.
 
 ## Tools (orchestrator)
 

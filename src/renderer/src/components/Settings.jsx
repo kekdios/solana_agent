@@ -10,9 +10,11 @@ export default function Settings({ onClose }) {
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [veniceKeyInput, setVeniceKeyInput] = useState("");
   const [nanogptKeyInput, setNanogptKeyInput] = useState("");
+  const [jupiterKeyInput, setJupiterKeyInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [savingVenice, setSavingVenice] = useState(false);
   const [savingNanogpt, setSavingNanogpt] = useState(false);
+  const [savingJupiter, setSavingJupiter] = useState(false);
   const [message, setMessage] = useState(null);
 
   const [walletEnsuring, setWalletEnsuring] = useState(false);
@@ -35,6 +37,20 @@ export default function Settings({ onClose }) {
   const [testingSolanaRpc, setTestingSolanaRpc] = useState(false);
   const [solanaRpcStatus, setSolanaRpcStatus] = useState(null); // "CONNECTED" | "NOT_CONNECTED" | null
   const [savingTier, setSavingTier] = useState(false);
+  const [savingSwaps, setSavingSwaps] = useState(false);
+  const [swapsEnabled, setSwapsEnabled] = useState(false);
+  const [swapsMaxSlippageBps, setSwapsMaxSlippageBps] = useState("50");
+  const [swapsMaxSwapSol, setSwapsMaxSwapSol] = useState("0.05");
+  const [swapsMaxSwapPct, setSwapsMaxSwapPct] = useState("20");
+  const [swapsExecutionEnabled, setSwapsExecutionEnabled] = useState(false);
+  const [swapsExecutionDryRun, setSwapsExecutionDryRun] = useState(true);
+  const [swapsMaxRequoteDevBps, setSwapsMaxRequoteDevBps] = useState("150");
+  const [swapsAutopilotEnabled, setSwapsAutopilotEnabled] = useState(false);
+  const [swapsAutopilotAutoExecute, setSwapsAutopilotAutoExecute] = useState(false);
+  const [swapsCooldownSeconds, setSwapsCooldownSeconds] = useState("60");
+  const [swapsMaxPerHour, setSwapsMaxPerHour] = useState("3");
+  const [swapsMaxPerDay, setSwapsMaxPerDay] = useState("10");
+  const [swapsMaxDailySol, setSwapsMaxDailySol] = useState("0.2");
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +74,25 @@ export default function Settings({ onClose }) {
       setEnvDataDir(env.DATA_DIR ?? "");
     }
   }, [config?.env]);
+
+  useEffect(() => {
+    const p = config?.swapsPolicy;
+    if (p) {
+      setSwapsEnabled(!!p.enabled);
+      setSwapsMaxSlippageBps(String(p.maxSlippageBps ?? "50"));
+      setSwapsMaxSwapSol(String(p.maxSwapSol ?? "0.05"));
+      setSwapsMaxSwapPct(String(p.maxSwapPctBalance ?? "20"));
+      setSwapsExecutionEnabled(!!p.executionEnabled);
+      setSwapsExecutionDryRun(p.executionDryRun !== false);
+      setSwapsMaxRequoteDevBps(String(p.maxRequoteDeviationBps ?? "150"));
+      setSwapsAutopilotEnabled(!!p.autopilotEnabled);
+      setSwapsAutopilotAutoExecute(!!p.autopilotAutoExecute);
+      setSwapsCooldownSeconds(String(p.cooldownSeconds ?? "60"));
+      setSwapsMaxPerHour(String(p.maxSwapsPerHour ?? "3"));
+      setSwapsMaxPerDay(String(p.maxSwapsPerDay ?? "10"));
+      setSwapsMaxDailySol(String(p.maxDailySwapSolVolume ?? "0.2"));
+    }
+  }, [config?.swapsPolicy]);
 
   const refetchConfig = () => {
     fetch(`${apiBase}/api/config`)
@@ -159,6 +194,37 @@ export default function Settings({ onClose }) {
     }
   };
 
+  const handleSaveJupiterKey = async (e) => {
+    e.preventDefault();
+    setSavingJupiter(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`${apiBase}/api/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "JUPITER_API_KEY", value: jupiterKeyInput.trim() }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setMessage({ type: "success", text: "Jupiter API key saved." });
+        setConfig((c) => ({
+          ...c,
+          JUPITER_API_KEY: {
+            status: jupiterKeyInput.trim() ? "CONNECTED" : "NOT_CONFIGURED",
+            masked: jupiterKeyInput.trim() && jupiterKeyInput.length > 8 ? jupiterKeyInput.slice(0, 4) + "…" + jupiterKeyInput.slice(-4) : null,
+          },
+        }));
+        setJupiterKeyInput("");
+      } else {
+        setMessage({ type: "error", text: data.error || "Failed to save" });
+      }
+    } catch (err) {
+      setMessage({ type: "error", text: err.message || "Request failed" });
+    } finally {
+      setSavingJupiter(false);
+    }
+  };
+
   const handleTestConnection = async () => {
     setTestingConnection(true);
     setMessage(null);
@@ -223,6 +289,29 @@ export default function Settings({ onClose }) {
       setMessage({ type: "error", text: err.message || "Request failed" });
     } finally {
       setSavingTier(false);
+    }
+  };
+
+  const saveSwapPolicy = async (patch) => {
+    setMessage(null);
+    setSavingSwaps(true);
+    try {
+      // Persist policy keys in the config table.
+      for (const [key, value] of Object.entries(patch)) {
+        const res = await fetch(`${apiBase}/api/config`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key, value }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Failed to save");
+      }
+      setMessage({ type: "success", text: "Swap policy saved." });
+      refetchConfig();
+    } catch (err) {
+      setMessage({ type: "error", text: err.message || "Request failed" });
+    } finally {
+      setSavingSwaps(false);
     }
   };
 
@@ -513,6 +602,39 @@ export default function Settings({ onClose }) {
 
           <section className="rounded-xl bg-[#222228] border border-[#2a2a30] p-4">
             <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-medium uppercase tracking-wider text-slate-400">Jupiter API key</span>
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+                  config?.JUPITER_API_KEY?.status === "CONNECTED" ? "bg-emerald-500/20 text-emerald-400" : "bg-slate-600/30 text-slate-400"
+                }`}
+              >
+                {config?.JUPITER_API_KEY?.status === "CONNECTED" && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+                {config?.JUPITER_API_KEY?.status === "CONNECTED" ? "CONNECTED" : "NOT CONFIGURED"}
+              </span>
+            </div>
+            <p className="text-sm text-slate-500 mb-2">Required for Metis quote/swap API (used by sovereign swaps).</p>
+            {config?.JUPITER_API_KEY?.masked && <p className="text-sm text-slate-500 mb-3">Current: {config.JUPITER_API_KEY.masked}</p>}
+            <form onSubmit={handleSaveJupiterKey} className="space-y-3">
+              <input
+                type="password"
+                value={jupiterKeyInput}
+                onChange={(e) => setJupiterKeyInput(e.target.value)}
+                placeholder="JUPITER_API_KEY"
+                className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50"
+                autoComplete="off"
+              />
+              <button
+                type="submit"
+                disabled={savingJupiter}
+                className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 py-1.5 text-sm font-medium text-white transition"
+              >
+                {savingJupiter ? "Saving…" : "Save Jupiter key"}
+              </button>
+            </form>
+          </section>
+
+          <section className="rounded-xl bg-[#222228] border border-[#2a2a30] p-4">
+            <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-medium uppercase tracking-wider text-slate-400">Inception API key</span>
               <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${isConnected ? "bg-emerald-500/20 text-emerald-400" : "bg-slate-600/30 text-slate-400"}`}>
                 {isConnected && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
@@ -796,6 +918,248 @@ export default function Settings({ onClose }) {
               <p><span className="text-slate-400 font-medium">Tier 2:</span> Can write local files/docs and use cron. HTTP requests limited to GET. No exec, no transfers.</p>
               <p><span className="text-slate-400 font-medium">Tier 3:</span> Can run exec and make HTTP requests. Still blocks SOL/SPL transfers.</p>
               <p><span className="text-slate-400 font-medium">Tier 4:</span> Full tool access. Use only if you intend the agent to act autonomously with the wallet.</p>
+            </div>
+          </section>
+
+          <section className="rounded-xl bg-[#222228] border border-[#2a2a30] p-4">
+            <span className="text-xs font-medium uppercase tracking-wider text-slate-400 block mb-3">Swaps (Jupiter)</span>
+            <p className="text-sm text-slate-500 mb-3">
+              Sovereign swaps are locally signed with your app wallet. Preparing swap intents requires Tier 4 and swaps enabled.
+            </p>
+
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <label className="text-sm text-slate-300">Enable swaps</label>
+              <button
+                type="button"
+                disabled={savingSwaps}
+                onClick={() => {
+                  const next = !swapsEnabled;
+                  setSwapsEnabled(next);
+                  saveSwapPolicy({ SWAPS_ENABLED: String(next) });
+                }}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition disabled:opacity-50 ${
+                  swapsEnabled ? "bg-emerald-600 text-white" : "bg-white/10 text-slate-300 hover:bg-white/15 hover:text-slate-200"
+                }`}
+                title="SWAPS_ENABLED"
+              >
+                {swapsEnabled ? "Enabled" : "Disabled"}
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm text-amber-100 font-medium">Execution (sends transactions)</div>
+                    <div className="text-xs text-amber-200/70 mt-0.5">
+                      Keep disabled unless you intend to broadcast swaps. Use dry-run to test simulate/sign without sending.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={savingSwaps}
+                    onClick={() => {
+                      const next = !swapsExecutionEnabled;
+                      setSwapsExecutionEnabled(next);
+                      saveSwapPolicy({ SWAPS_EXECUTION_ENABLED: String(next) });
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition disabled:opacity-50 ${
+                      swapsExecutionEnabled ? "bg-amber-500 text-black" : "bg-white/10 text-slate-300 hover:bg-white/15 hover:text-slate-200"
+                    }`}
+                    title="SWAPS_EXECUTION_ENABLED"
+                  >
+                    {swapsExecutionEnabled ? "Execution ON" : "Execution OFF"}
+                  </button>
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <label className="text-sm text-slate-200">Dry-run (simulate only)</label>
+                  <button
+                    type="button"
+                    disabled={savingSwaps}
+                    onClick={() => {
+                      const next = !swapsExecutionDryRun;
+                      setSwapsExecutionDryRun(next);
+                      saveSwapPolicy({ SWAPS_EXECUTION_DRY_RUN: String(next) });
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition disabled:opacity-50 ${
+                      swapsExecutionDryRun ? "bg-emerald-600 text-white" : "bg-white/10 text-slate-300 hover:bg-white/15 hover:text-slate-200"
+                    }`}
+                    title="SWAPS_EXECUTION_DRY_RUN"
+                  >
+                    {swapsExecutionDryRun ? "Dry-run ON" : "Dry-run OFF"}
+                  </button>
+                </div>
+                <div className="mt-3">
+                  <label className="text-xs text-slate-500 block mb-1">Max re-quote deviation (bps)</label>
+                  <input
+                    type="text"
+                    value={swapsMaxRequoteDevBps}
+                    onChange={(e) => setSwapsMaxRequoteDevBps(e.target.value)}
+                    className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={savingSwaps}
+                  onClick={() =>
+                    saveSwapPolicy({
+                      SWAPS_MAX_REQUOTE_DEVIATION_BPS: String(swapsMaxRequoteDevBps || "150"),
+                    })
+                  }
+                  className="mt-3 w-full rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 py-2 text-sm font-medium text-slate-200 transition"
+                >
+                  {savingSwaps ? "Saving…" : "Save execution checks"}
+                </button>
+              </div>
+              <div className="rounded-lg border border-[#2a2a30] bg-black/20 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm text-slate-100 font-medium">Autopilot (optional)</div>
+                    <div className="text-xs text-slate-400 mt-0.5">
+                      When enabled, the agent can auto-confirm swap intents that meet these limits. Auto-execute is a separate toggle.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={savingSwaps}
+                    onClick={() => {
+                      const next = !swapsAutopilotEnabled;
+                      setSwapsAutopilotEnabled(next);
+                      saveSwapPolicy({ SWAPS_AUTOPILOT_ENABLED: String(next) });
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition disabled:opacity-50 ${
+                      swapsAutopilotEnabled ? "bg-emerald-600 text-white" : "bg-white/10 text-slate-300 hover:bg-white/15 hover:text-slate-200"
+                    }`}
+                    title="SWAPS_AUTOPILOT_ENABLED"
+                  >
+                    {swapsAutopilotEnabled ? "Autopilot ON" : "Autopilot OFF"}
+                  </button>
+                </div>
+
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <label className="text-sm text-slate-200">Auto-execute (after auto-confirm)</label>
+                  <button
+                    type="button"
+                    disabled={savingSwaps || !swapsAutopilotEnabled}
+                    onClick={() => {
+                      const next = !swapsAutopilotAutoExecute;
+                      setSwapsAutopilotAutoExecute(next);
+                      saveSwapPolicy({ SWAPS_AUTOPILOT_AUTO_EXECUTE: String(next) });
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition disabled:opacity-50 ${
+                      swapsAutopilotAutoExecute ? "bg-amber-500 text-black" : "bg-white/10 text-slate-300 hover:bg-white/15 hover:text-slate-200"
+                    }`}
+                    title="SWAPS_AUTOPILOT_AUTO_EXECUTE"
+                  >
+                    {swapsAutopilotAutoExecute ? "Auto-execute ON" : "Auto-execute OFF"}
+                  </button>
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Cooldown (seconds)</label>
+                    <input
+                      type="text"
+                      value={swapsCooldownSeconds}
+                      onChange={(e) => setSwapsCooldownSeconds(e.target.value)}
+                      className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-500 block mb-1">Max swaps / hour</label>
+                      <input
+                        type="text"
+                        value={swapsMaxPerHour}
+                        onChange={(e) => setSwapsMaxPerHour(e.target.value)}
+                        className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-500 block mb-1">Max swaps / day</label>
+                      <input
+                        type="text"
+                        value={swapsMaxPerDay}
+                        onChange={(e) => setSwapsMaxPerDay(e.target.value)}
+                        className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Max daily SOL swap volume</label>
+                    <input
+                      type="text"
+                      value={swapsMaxDailySol}
+                      onChange={(e) => setSwapsMaxDailySol(e.target.value)}
+                      className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={savingSwaps}
+                  onClick={() =>
+                    saveSwapPolicy({
+                      SWAPS_COOLDOWN_SECONDS: String(swapsCooldownSeconds || "60"),
+                      SWAPS_MAX_SWAPS_PER_HOUR: String(swapsMaxPerHour || "3"),
+                      SWAPS_MAX_SWAPS_PER_DAY: String(swapsMaxPerDay || "10"),
+                      SWAPS_MAX_DAILY_SWAP_SOL_VOLUME: String(swapsMaxDailySol || "0.2"),
+                    })
+                  }
+                  className="mt-3 w-full rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 py-2 text-sm font-medium text-slate-200 transition"
+                >
+                  {savingSwaps ? "Saving…" : "Save autopilot limits"}
+                </button>
+
+                <p className="text-xs text-slate-500 mt-2">
+                  Autopilot still respects allowlists, caps, re-quote checks, simulation, fee/compute bounds, and the execution kill-switch.
+                </p>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Max slippage (bps)</label>
+                <input
+                  type="text"
+                  value={swapsMaxSlippageBps}
+                  onChange={(e) => setSwapsMaxSlippageBps(e.target.value)}
+                  className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Max swap size (SOL)</label>
+                <input
+                  type="text"
+                  value={swapsMaxSwapSol}
+                  onChange={(e) => setSwapsMaxSwapSol(e.target.value)}
+                  className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">Max swap % of balance</label>
+                <input
+                  type="text"
+                  value={swapsMaxSwapPct}
+                  onChange={(e) => setSwapsMaxSwapPct(e.target.value)}
+                  className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={savingSwaps}
+                onClick={() =>
+                  saveSwapPolicy({
+                    SWAPS_MAX_SLIPPAGE_BPS: String(swapsMaxSlippageBps || "50"),
+                    SWAPS_MAX_SWAP_SOL: String(swapsMaxSwapSol || "0.05"),
+                    SWAPS_MAX_SWAP_PCT_BALANCE: String(swapsMaxSwapPct || "20"),
+                  })
+                }
+                className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 py-2 text-sm font-medium text-white transition"
+              >
+                {savingSwaps ? "Saving…" : "Save swap policy"}
+              </button>
+              <p className="text-xs text-slate-500">
+                Defaults: input SOL and output USDC allowlisted. Execution is Tier 4 and gated by an explicit kill-switch.
+              </p>
             </div>
           </section>
 
