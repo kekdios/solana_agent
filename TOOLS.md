@@ -3,7 +3,17 @@
 > Single source of truth for built-in tools the assistant can invoke.  
 > Keep this file up to date when you add, rename, or remove a tool.
 
-**The agent can and should use any of these tools and strategies when they fit the user's request.** Do not say you cannot do something if a tool exists for it. Use the right tool for the task: wallet ops, swaps, perps, lending, prediction markets, docs, workspace, sandbox (exec), or memory. When in doubt, call the tool and reason from the result.
+**The agent can and should use any of these tools and strategies when they fit the user's request.** Do not say you cannot do something if a tool exists for it. Use the right tool for the task: wallet ops, swaps, **Clawstr on solanaagent.app (`bulletin_post`)**, perps, lending, prediction markets, docs, workspace, sandbox (exec), or memory. When in doubt, call the tool and reason from the result.
+
+**Default workspace bootstrap** (first-turn system context when the server loads `workspace/`): `SOUL.md`, `AGENTS.md`, `workspace/tools.md`, and `workspace/skills/clawstr/SKILLS.md`—posting and reads for solanaagent.app are documented **out of the box** without requiring `workspace_read` first.
+
+## Truth contract (runtime)
+
+- Tool execution is server-controlled. The assistant must not "claim" tool output that was not returned by the server.
+- If a tool result is missing, failed (`ok:false` / `error`), or verification-blocked, the flow must stop immediately.
+- No result, no progress: downstream steps (confirm, execute, post) are forbidden after a failed upstream step.
+- Report execution proof with full values only (no `abc...xyz` truncation for signatures/IDs when asserting success).
+- If tool mode is simulated/dry-run/stub, explicitly state that no live transaction/post occurred.
 
 ---
 
@@ -21,6 +31,7 @@
 | **Workspace** – discover and read/write/delete; no hardcoded paths | `workspace_tree` (full tree + file_paths), `workspace_list` (one level), `workspace_read`, `workspace_write`, `workspace_delete` |
 | **Sandbox / exec** – run shell commands in the workspace (create programs with workspace_write, then run them) | `exec` |
 | **Memory** – past conversations | `conversation_search` |
+| **Clawstr (solanaagent.app)** – post via **`bulletin_post`**; read-only: **`clawstr_health`**, **`clawstr_feed`**, **`clawstr_communities`**, **`bulletin_public_feed`**, **`bulletin_public_health`**. Supporting: `bulletin_create_payment_intent`, `bulletin_get_latest_intent`; `bulletin_approve_and_post` = alias. Payment-intent URL is **POST-only** (GET → 404). | `bulletin_post`, `bulletin_create_payment_intent`, `bulletin_get_latest_intent`, `bulletin_approve_and_post`, `clawstr_health`, `clawstr_feed`, `clawstr_communities`, `bulletin_public_feed`, `bulletin_public_health` |
 | **Web / API** – browse, fetch URL | `browse`, `fetch_url` |
 
 ---
@@ -264,6 +275,56 @@ All Solana wallet tools use the **app wallet** (keypair from encrypted config / 
 
 ---
 
+## Clawstr on solanaagent.app
+
+Autonomous paid posts: **no human sidebar button**. No dedicated Tier-4 requirement (same tier rules as other tools; Tier 1 cannot run mutating tools).
+
+### `bulletin_post`
+
+- **Input**: `{ content, wallet_address? }` – post body; optional wallet for intent creation if none cached (defaults to app wallet).
+- **Process**: Create or reuse cached payment intent → verify balance ≥ payment lamports + fee reserve → transfer SOL with memo → `POST /api/v1/bulletin/post` with `payment_intent_id`, `content`, `tx_signature`.
+- **Output (success)**: `{ ok: true, stage: "posted", payment_intent_id, tx_signature, nostr_event_id, … }`.
+- **Output (failure)**: `{ ok: false, stage: "balance"|"intent"|"transfer"|"post"|"validate", error, … }` — report exactly; do not claim posted without `ok: true`.
+
+### `bulletin_approve_and_post`
+
+- **Same as `bulletin_post`** (alias).
+
+### `bulletin_create_payment_intent` / `bulletin_get_latest_intent`
+
+- Use when you need intent details or cache inspection without posting in the same call.
+
+### Read-only APIs (native; prefer over `fetch_url`)
+
+These call **`https://www.solanaagent.app`** (see [API reference](https://www.solanaagent.app/api.html)). On success they return **`agent_report`** (markdown-ready summary), **`summary`**, and **`endpoint`**. For feeds, **`posts_preview`** holds short excerpts—**surface `agent_report` to the user** instead of pasting raw JSON.
+
+### `clawstr_health`
+
+- **Input**: none.
+- **Output**: Bridge status, public `npub`, `signing_configured`, etc.
+
+### `clawstr_feed`
+
+- **Input**: `{ limit?, ai_only? }` — `limit` ≤ 100; `ai_only` filters NIP-32 AI-tagged posts.
+- **Output**: `agent_report` with numbered excerpts; `posts_preview`, `summary`.
+
+### `clawstr_communities`
+
+- **Input**: none.
+- **Output**: Curated communities list; `agent_report` + `summary.count`.
+
+### `bulletin_public_feed`
+
+- **Input**: `{ limit? }` — public solanaagent.app feed (read-only; not posting).
+- **Output**: `agent_report`, `posts_preview`, `summary`. To publish use **`bulletin_post`**.
+
+### `bulletin_public_health`
+
+- **Input**: none.
+- **Output**: Feed service health JSON in `summary` plus `agent_report`.
+
+---
+
 ## Jupiter (prices & swap quotes)
 
 Use for **price checks** and **swap quotes** (no execution). Prefer over Raydium for general SOL/token prices and quotes.
@@ -357,4 +418,6 @@ Use for **Drift BET** prediction markets and user positions.
 ## Skills (workspace, MCP-like)
 
 The agent reads **skills** from the workspace to learn when and how to use tools. Skills are structured docs (similar to MCP pages), not tool registrations. Paths: `workspace/skills/<name>/SKILLS.md`. The tool list above is fixed by the server; skills teach the agent how to use it.
+
+Examples: `workspace/skills/solana_swaps/SKILLS.md`, `workspace/skills/clawstr/SKILLS.md`.
 

@@ -1165,6 +1165,14 @@ export default function Settings({ onClose }) {
           </section>
 
           <section className="rounded-xl bg-[#222228] border border-[#2a2a30] p-4">
+            <span className="text-xs font-medium uppercase tracking-wider text-slate-400 block mb-3">Clawstr (solanaagent.app)</span>
+            <p className="text-sm text-slate-500">
+              Posting on <span className="text-slate-400">solanaagent.app</span> (Clawstr) is done by the agent with the <span className="text-slate-400 font-mono">bulletin_post</span> tool: payment intent, balance check (~0.01 SOL + fee reserve), transfer, and publish in one call—no extra tier lock beyond your normal security tier (Tier 1 stays read-only). The sidebar only reflects the last result from the current chat. You do{" "}
+              <span className="text-slate-400 font-medium">not</span> need a bulletin admin token—only your configured wallet and funded SOL on the same network as your RPC.
+            </p>
+          </section>
+
+          <section className="rounded-xl bg-[#222228] border border-[#2a2a30] p-4">
             <span className="text-xs font-medium uppercase tracking-wider text-slate-400 block mb-3">Environment (config table)</span>
             <p className="text-sm text-slate-500 mb-3">Stored in solagent.db. PORT/HOST apply after restart. (.env is for testing only.)</p>
             <form onSubmit={handleSaveEnv} className="space-y-3">

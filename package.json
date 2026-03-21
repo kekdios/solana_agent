@@ -38,7 +38,8 @@
     "electron": "env -u ELECTRON_RUN_AS_NODE electron .",
     "build": "npm run build:renderer && electron-builder --mac --dir && (open dist/mac-arm64/Solana\\ Agent.app 2>/dev/null || true)",
     "test": "node -e \"console.log('OK')\"",
-    "test:in-process-server": "node scripts/test-in-process-server.js"
+    "test:in-process-server": "node scripts/test-in-process-server.js",
+    "test:clawstr": "node scripts/test-clawstr-e2e.js"
   },
   "build": {
     "appId": "com.solana.agent.trader",

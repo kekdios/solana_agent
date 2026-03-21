@@ -3,7 +3,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { join, extname, dirname } from "path";
 import { fileURLToPath } from "url";
 import { randomBytes, createCipheriv, createDecipheriv, randomUUID } from "crypto";
-import { Keypair, Connection, PublicKey } from "@solana/web3.js";
+import { Keypair, Connection, PublicKey, Transaction, SystemProgram } from "@solana/web3.js";
 import bs58 from "bs58";
 import yaml from "js-yaml";
 import * as db from "./db.js";
@@ -33,7 +33,8 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const INCEPTION_API = "https://api.inceptionlabs.ai/v1/chat/completions";
 const VENICE_API = "https://api.venice.ai/api/v1/chat/completions";
 const NANOGPT_API = "https://nano-gpt.com/api/v1/chat/completions";
-const WORKSPACE_FILES = ["SOUL.md", "AGENTS.md", "tools.md"];
+/** Injected into the first-turn system message (concatenated, in order). Keep lean; full repo TOOLS.md is separate. */
+const WORKSPACE_FILES = ["SOUL.md", "AGENTS.md", "tools.md", "skills/clawstr/SKILLS.md"];
 
 /** Jupiter swap program ID (mainnet). Used to detect Jupiter transactions vs spam/other. */
 const JUPITER_PROGRAM_ID = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
@@ -323,6 +324,51 @@ const PARAM_SCHEMAS = {
   bet_positions: { type: "object", properties: {} },
   get_swap_settings: { type: "object", properties: {}, required: [] },
   clear_expired_swap_intents: { type: "object", properties: {}, required: [] },
+  bulletin_create_payment_intent: {
+    type: "object",
+    properties: {
+      wallet_address: { type: "string", description: "Optional wallet address; defaults to app wallet in Settings." },
+    },
+    required: [],
+  },
+  bulletin_get_latest_intent: { type: "object", properties: {}, required: [] },
+  bulletin_post: {
+    type: "object",
+    properties: {
+      content: { type: "string", description: "Text to publish on solanaagent.app Clawstr (autonomous: pay + post in one tool)." },
+      wallet_address: {
+        type: "string",
+        description: "Optional Solana address for payment intent when none is cached; defaults to app wallet in Settings.",
+      },
+    },
+    required: ["content"],
+  },
+  bulletin_approve_and_post: {
+    type: "object",
+    properties: {
+      content: { type: "string", description: "Same as bulletin_post (alias)." },
+      wallet_address: { type: "string", description: "Optional; defaults to app wallet." },
+    },
+    required: ["content"],
+  },
+  clawstr_health: { type: "object", properties: {}, required: [] },
+  clawstr_feed: {
+    type: "object",
+    properties: {
+      limit: { type: "integer", description: "Max posts (default 30, max 100)." },
+      ai_only: { type: "boolean", description: "If true, only posts with Clawstr NIP-32 AI tags." },
+    },
+    required: [],
+  },
+  clawstr_communities: { type: "object", properties: {}, required: [] },
+  bulletin_public_feed: {
+    type: "object",
+    properties: {
+      limit: { type: "integer", description: "Max entries (default 30, max 100)." },
+    },
+    required: [],
+  },
+  bulletin_public_health: { type: "object", properties: {}, required: [] },
 };
 
 function loadToolRegistry() {
@@ -383,6 +429,12 @@ function toolAllowedByTier(tier, name, args) {
     "get_btc_price",
     "get_swap_settings",
     "clear_expired_swap_intents",
+    "bulletin_get_latest_intent",
+    "clawstr_health",
+    "clawstr_feed",
+    "clawstr_communities",
+    "bulletin_public_feed",
+    "bulletin_public_health",
     "conversation_search",
     "file_list",
     "file_read",
@@ -410,6 +462,9 @@ function toolAllowedByTier(tier, name, args) {
     "bet_positions",
   ]);
   if (alwaysAllow.has(name)) return true;
+
+  // solanaagent.app Clawstr posting (bulletin_post, bulletin_approve_and_post): no extra tier gate—same as other
+  // non-swap tools (Tier 2+ can run HTTP-side-effect tools; Tier 1 remains read-only).
 
   // Swap execution flow is Tier 4 only (sovereign funds movement capability).
   if (name === "jupiter_swap_prepare" || name === "jupiter_swap_execute" || name === "jupiter_swap_cancel" || name === "jupiter_swap_confirm") return false;
@@ -542,6 +597,30 @@ async function runTool(name, args, env) {
         return getSwapSettings();
       case "clear_expired_swap_intents":
         return db.clearExpiredSwapIntents();
+      case "bulletin_create_payment_intent": {
+        const walletAddress = (args?.wallet_address || getSolanaPublicKeyFromConfig() || "").trim();
+        if (!walletAddress) return { ok: false, error: "wallet_address is required (or configure app wallet in Settings)." };
+        const out = await bulletinCreatePaymentIntent(walletAddress);
+        if (out.ok && out.data?.payment_intent && out.data?.payment) {
+          latestBulletinIntent = { payment_intent: out.data.payment_intent, payment: out.data.payment };
+        }
+        return out.ok ? out.data : { ok: false, status: out.status, ...(out.data || {}) };
+      }
+      case "bulletin_get_latest_intent":
+        return { ok: true, latest: latestBulletinIntent };
+      case "bulletin_post":
+      case "bulletin_approve_and_post":
+        return await runBulletinAutonomousPostCore(args, env);
+      case "clawstr_health":
+        return await toolClawstrHealth();
+      case "clawstr_feed":
+        return await toolClawstrFeed(args);
+      case "clawstr_communities":
+        return await toolClawstrCommunities();
+      case "bulletin_public_feed":
+        return await toolBulletinPublicFeed(args);
+      case "bulletin_public_health":
+        return await toolBulletinPublicHealth();
       // Redirect legacy EVM-style names to Solana (app is Solana-only)
       case "account_balance":
         return await solana.solanaBalance(args, env);
@@ -551,7 +630,9 @@ async function runTool(name, args, env) {
         return { error: `Unknown tool: ${name}. For wallet use solana_balance and solana_address.` };
     }
   } catch (e) {
-    return { error: String(e.message) };
+    const msg =
+      e == null ? String(e) : typeof e === "string" ? e : (e?.message != null ? String(e.message) : String(e));
+    return { ok: false, error: msg };
   }
 }
 
@@ -1067,6 +1148,137 @@ function looksLikeToolArgs(s) {
   return (t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"));
 }
 
+function safeJsonParse(input) {
+  try {
+    return JSON.parse(input);
+  } catch {
+    return null;
+  }
+}
+
+function isValidBase58Signature(sig) {
+  if (typeof sig !== "string") return false;
+  const t = sig.trim();
+  if (!t) return false;
+  try {
+    const decoded = bs58.decode(t);
+    // Solana signatures are 64-byte ed25519 signatures encoded as base58.
+    return decoded.length === 64;
+  } catch {
+    return false;
+  }
+}
+
+function inferToolMode(name, result) {
+  const msg = String(result?.message || "").toLowerCase();
+  if (result?.status === "simulated") return "simulated";
+  if (result?.dry_run === true) return "simulated";
+  if (result?.broadcast === false) return "simulated";
+  if (msg.includes("dry_run") || msg.includes("simulated") || msg.includes("stub")) return "simulated";
+  if (["drift_place_order", "kamino_deposit", "raydium_quote", "raydium_market_detect", "bet_markets", "bet_positions"].includes(name)) {
+    return "simulated";
+  }
+  return "live";
+}
+
+function normalizeToolResult(name, args, rawResult) {
+  const parsedIfString = typeof rawResult === "string" ? safeJsonParse(rawResult) : null;
+  let result = parsedIfString ?? rawResult;
+  const source = "tool";
+  const mode = inferToolMode(name, result);
+  let status = "success";
+  let error = null;
+  let verification = { ok: true };
+
+  if (result == null) {
+    status = "error";
+    error = "No tool result returned.";
+    result = { ok: false, error };
+  } else if (typeof result === "object") {
+    if (result.ok === false || result.error) {
+      status = "error";
+      const rawErr = result.error;
+      error =
+        rawErr == null
+          ? "Tool returned ok:false"
+          : typeof rawErr === "string"
+            ? rawErr
+            : typeof rawErr === "object" && rawErr != null && rawErr.message != null
+              ? String(rawErr.message)
+              : String(rawErr);
+    }
+
+    if (name === "solana_transfer" && result.ok === true) {
+      const sig = result.signature;
+      if (!isValidBase58Signature(sig)) {
+        verification = { ok: false, reason: "signature_invalid_shape", field: "signature" };
+        status = "error";
+        error = "Tool reported success but returned an invalid Solana signature shape.";
+        result = { ...result, ok: false, error: `TOOL_RESULT_VERIFICATION_FAILED: ${error}`, verification };
+      }
+    }
+    if (name === "solana_transfer_spl" && result.ok === true) {
+      const sig = result.signature;
+      if (!isValidBase58Signature(sig)) {
+        verification = { ok: false, reason: "signature_invalid_shape", field: "signature" };
+        status = "error";
+        error = "Tool reported success but returned an invalid Solana signature shape.";
+        result = { ...result, ok: false, error: `TOOL_RESULT_VERIFICATION_FAILED: ${error}`, verification };
+      }
+    }
+    if (name === "jupiter_swap_execute" && result.ok === true && result.dry_run !== true) {
+      const sig = result.VERIFIED_SIGNATURE || result.signature;
+      if (!isValidBase58Signature(sig)) {
+        verification = { ok: false, reason: "signature_invalid_shape", field: "VERIFIED_SIGNATURE|signature" };
+        status = "error";
+        error = "Swap execute reported success but returned an invalid signature shape.";
+        result = { ...result, ok: false, error: `TOOL_RESULT_VERIFICATION_FAILED: ${error}`, verification };
+      }
+    }
+  } else {
+    status = "error";
+    error = "Tool returned a non-JSON scalar result.";
+    result = { ok: false, error, raw: String(rawResult) };
+  }
+
+  return {
+    tool: name,
+    args: args || {},
+    source,
+    mode,
+    status,
+    verification,
+    blocking: status !== "success",
+    error,
+    result,
+  };
+}
+
+function buildBlockedToolMessage(receipt) {
+  return [
+    "STATUS: BLOCKED",
+    `REASON: ${receipt?.error || "No successful tool result"}`,
+    `TOOL: ${receipt?.tool || "unknown"}`,
+    `MODE: ${receipt?.mode || "unknown"}`,
+    "No further steps were executed.",
+  ].join("\n");
+}
+
+function summarizeToolVerification(toolResults) {
+  const list = Array.isArray(toolResults) ? toolResults : [];
+  const total = list.length;
+  const failed = list.filter((t) => t?.status === "error").length;
+  const simulated = list.filter((t) => t?.mode === "simulated").length;
+  const verificationFailed = list.filter((t) => t?.verification?.ok === false).length;
+  return {
+    total,
+    failed,
+    simulated,
+    verification_failed: verificationFailed,
+    ok: total > 0 ? failed === 0 : true,
+  };
+}
+
 /** No .env fallback — config is from Settings (config table) only. Empty env passed to tools; they use process.env (set from config). */
 const env = {};
 const ENV_PATH = process.env.ENV_PATH || join(__dirname, ".env");
@@ -1339,6 +1551,411 @@ function getSolanaPublicKeyFromConfig() {
     if (dec && dec.trim()) return dec.trim();
   } catch (_) {}
   return null;
+}
+
+function getBulletinBaseUrl() {
+  const fromConfig = loadConfigKey("BULLETIN_BASE_URL");
+  const url = (fromConfig || process.env.BULLETIN_BASE_URL || "https://www.solanaagent.app").trim();
+  return url.replace(/\/+$/, "");
+}
+
+let latestBulletinIntent = null;
+
+async function bulletinCreatePaymentIntent(walletAddress) {
+  const base = getBulletinBaseUrl();
+  const r = await fetch(`${base}/api/v1/bulletin/payment-intent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ wallet_address: walletAddress }),
+    signal: AbortSignal.timeout(12000),
+  });
+  const data = await r.json().catch(() => ({}));
+  return { ok: r.ok, status: r.status, data };
+}
+
+/** Turn simulation "insufficient lamports X, need Y" into a short funding hint for the UI. */
+function appendInsufficientLamportsHint(message) {
+  const m = String(message);
+  const match = m.match(/insufficient lamports (\d+), need (\d+)/);
+  if (!match) return m;
+  const haveSol = (Number(match[1]) / 1e9).toFixed(6);
+  const needSol = (Number(match[2]) / 1e9).toFixed(6);
+  return (
+    `${m}\n\n` +
+    `Not enough SOL: your app wallet has ~${haveSol} SOL but this bulletin payment needs ~${needSol} SOL (plus a small amount for network fees). ` +
+    `Send SOL to this wallet in Settings → Solana Wallet (same network as your RPC), then try Pay & post again.`
+  );
+}
+
+async function sendSolTransferWithMemo({ to, lamports, memo }) {
+  const kpCfg = getSolanaKeypairFromConfig();
+  if (!kpCfg?.privateKeyBase58) return { ok: false, error: "Solana wallet not configured in Settings." };
+  let keypair;
+  try {
+    const bytes = bs58.decode(kpCfg.privateKeyBase58);
+    keypair = Keypair.fromSecretKey(bytes);
+  } catch (e) {
+    return { ok: false, error: `Failed to decode configured wallet private key: ${e.message || String(e)}` };
+  }
+  try {
+    const rpcUrl = configSolanaRpc || process.env.SOLANA_RPC_URL || DEFAULT_SOLANA_RPC;
+    const conn = new Connection(rpcUrl, { commitment: "confirmed" });
+    const tx = new Transaction();
+    tx.add(
+      SystemProgram.transfer({
+        fromPubkey: keypair.publicKey,
+        toPubkey: new PublicKey(String(to).trim()),
+        lamports: Number(lamports),
+      })
+    );
+    if (memo && String(memo).trim()) {
+      tx.add({
+        keys: [],
+        programId: new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
+        data: Buffer.from(String(memo), "utf8"),
+      });
+    }
+    const sig = await conn.sendTransaction(tx, [keypair], {
+      skipPreflight: false,
+      preflightCommitment: "confirmed",
+      maxRetries: 3,
+    });
+    const conf = await conn.confirmTransaction(sig, "confirmed");
+    if (conf.value?.err) {
+      return { ok: false, error: `Transaction failed: ${JSON.stringify(conf.value.err)}`, signature: sig };
+    }
+    return { ok: true, signature: sig };
+  } catch (e) {
+    return { ok: false, error: appendInsufficientLamportsHint(e.message || String(e)) };
+  }
+}
+
+async function bulletinCreatePost(payment_intent_id, content, tx_signature) {
+  const base = getBulletinBaseUrl();
+  const payload = { payment_intent_id, content };
+  const sig = (tx_signature && String(tx_signature).trim()) || "";
+  if (sig) payload.tx_signature = sig;
+  const r = await fetch(`${base}/api/v1/bulletin/post`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(12000),
+  });
+  const data = await r.json().catch(() => ({}));
+  return { ok: r.ok, status: r.status, data };
+}
+
+/** Short plain-text excerpt for agent-facing previews. */
+function agentTextExcerpt(s, n = 240) {
+  const t = String(s ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return "";
+  return t.length <= n ? t : `${t.slice(0, n)}…`;
+}
+
+/** GET JSON from solanaagent.app (or BULLETIN_BASE_URL). Path must start with /. */
+async function fetchSolanaAgentRead(path, searchParams = {}) {
+  const base = getBulletinBaseUrl();
+  const pathNorm = path.startsWith("/") ? path : `/${path}`;
+  const u = new URL(pathNorm, `${base}/`);
+  for (const [k, v] of Object.entries(searchParams)) {
+    if (v === undefined || v === null || v === "") continue;
+    u.searchParams.set(k, String(v));
+  }
+  const r = await fetch(u.toString(), { method: "GET", signal: AbortSignal.timeout(15000) });
+  const text = await r.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { _non_json: true, body_preview: text.slice(0, 500) };
+  }
+  return { httpOk: r.ok, status: r.status, path: u.pathname + u.search, request_url: u.toString(), data };
+}
+
+async function toolClawstrHealth() {
+  const res = await fetchSolanaAgentRead("/api/v1/clawstr/health");
+  if (!res.httpOk) {
+    const err = res.data?.error || res.data?.message || `HTTP ${res.status}`;
+    return {
+      ok: false,
+      error: err,
+      agent_report: `**Clawstr health** — request failed (${res.status}). ${err}`,
+      endpoint: res.path,
+      request_url: res.request_url,
+    };
+  }
+  const d = res.data || {};
+  const signing =
+    d.signing_configured === true
+      ? "Relay signing is **configured**."
+      : d.signing_configured === false
+        ? "Relay signing is **not** configured on the server."
+        : "Signing status not specified.";
+  const npub = d.npub || d.public_npub || null;
+  const sub = d.subclaw_url || d.subclaw || d.url || null;
+  return {
+    ok: true,
+    agent_report:
+      `**Clawstr (Nostr · solanaagent subclaw)** — ${signing}` +
+      (npub ? `\n- **npub:** \`${npub}\`` : "") +
+      (sub ? `\n- **Subclaw / bridge:** ${sub}` : "") +
+      `\n- Docs: [solanaagent.app API — Clawstr](https://www.solanaagent.app/api.html)`,
+    summary: {
+      signing_configured: d.signing_configured,
+      npub,
+      subclaw_url: sub,
+    },
+    endpoint: res.path,
+  };
+}
+
+async function toolClawstrFeed(args) {
+  const limit = Math.min(100, Math.max(1, Number(args?.limit) || 30));
+  const aiOnly = args?.ai_only === true || args?.ai_only === "true" || args?.ai_only === 1;
+  const q = { limit: String(limit) };
+  if (aiOnly) q.ai_only = "1";
+  const res = await fetchSolanaAgentRead("/api/v1/clawstr/feed", q);
+  if (!res.httpOk) {
+    const err = res.data?.error || res.data?.message || `HTTP ${res.status}`;
+    return {
+      ok: false,
+      error: err,
+      agent_report: `**Clawstr feed** — could not load (${res.status}). ${err}`,
+      endpoint: res.path,
+    };
+  }
+  const d = res.data || {};
+  const posts = Array.isArray(d.posts)
+    ? d.posts
+    : Array.isArray(d.items)
+      ? d.items
+      : Array.isArray(d.results)
+        ? d.results
+        : Array.isArray(d)
+          ? d
+          : [];
+  const previews = posts.slice(0, 25).map((p, i) => {
+    const body = p.content || p.text || p.body || p.message || "";
+    return {
+      n: i + 1,
+      id: p.id || p.event_id || p.eventId || p.nostr_event_id || null,
+      created_at: p.created_at || p.createdAt || p.ts || null,
+      excerpt: agentTextExcerpt(body, 200),
+    };
+  });
+  const lines = previews.filter((p) => p.excerpt || p.id).map((p) => {
+    const head = p.id ? `**${p.n}.** \`${p.id}\`` : `**${p.n}.**`;
+    const tail = p.created_at ? ` _(${p.created_at})_` : "";
+    return `${head}${tail}${p.excerpt ? ` — ${p.excerpt}` : ""}`;
+  });
+  const report =
+    `**Clawstr feed** — **${posts.length}** post(s) (limit=${limit}, ai_only=${aiOnly}).` +
+    (lines.length ? `\n\n${lines.join("\n")}` : "\n\n_(No post bodies parsed in this response; try a smaller limit or check the API directly.)_") +
+    `\n\n_Source: [API reference](https://www.solanaagent.app/api.html)_`;
+  return {
+    ok: true,
+    agent_report: report,
+    summary: { total_returned: posts.length, limit, ai_only, preview_count: previews.length },
+    posts_preview: previews,
+    endpoint: res.path,
+  };
+}
+
+async function toolClawstrCommunities() {
+  const res = await fetchSolanaAgentRead("/api/v1/clawstr/communities");
+  if (!res.httpOk) {
+    const err = res.data?.error || res.data?.message || `HTTP ${res.status}`;
+    return { ok: false, error: err, agent_report: `**Clawstr communities** — failed (${res.status}). ${err}`, endpoint: res.path };
+  }
+  const d = res.data || {};
+  const list = Array.isArray(d.communities)
+    ? d.communities
+    : Array.isArray(d.items)
+      ? d.items
+      : Array.isArray(d)
+        ? d
+        : [];
+  const lines = list.slice(0, 40).map((c, i) => {
+    const name = c.name || c.title || c.slug || c.id || `item ${i + 1}`;
+    const url = c.url || c.href || c.link || "";
+    return url ? `- **${name}** — ${url}` : `- **${name}**`;
+  });
+  return {
+    ok: true,
+    agent_report:
+      `**Clawstr communities** — **${list.length}** entr${list.length === 1 ? "y" : "ies"} (curated list for solanaagent.app).\n\n` +
+      (lines.length ? lines.join("\n") : "_(Empty or unrecognized list shape.)_") +
+      `\n\n_Source: [API](https://www.solanaagent.app/api.html)_`,
+    summary: { count: list.length },
+    endpoint: res.path,
+  };
+}
+
+async function toolBulletinPublicFeed(args) {
+  const limit = Math.min(100, Math.max(1, Number(args?.limit) || 30));
+  const res = await fetchSolanaAgentRead("/api/v1/bulletin/feed", { limit: String(limit) });
+  if (!res.httpOk) {
+    const err = res.data?.error || res.data?.message || `HTTP ${res.status}`;
+    return {
+      ok: false,
+      error: err,
+      agent_report: `**solanaagent.app public feed (read-only)** — failed (${res.status}). ${err}`,
+      endpoint: res.path,
+    };
+  }
+  const d = res.data || {};
+  const posts = Array.isArray(d.posts)
+    ? d.posts
+    : Array.isArray(d.items)
+      ? d.items
+      : Array.isArray(d)
+        ? d
+        : [];
+  const previews = posts.slice(0, 25).map((p, i) => {
+    const body = p.content || p.text || p.body || "";
+    return {
+      n: i + 1,
+      id: p.id || p.post_id || p.nostr_event_id || null,
+      status: p.status || null,
+      excerpt: agentTextExcerpt(body, 200),
+    };
+  });
+  const lines = previews.map((p) => {
+    const st = p.status ? ` [${p.status}]` : "";
+    return `**${p.n}.**${p.id ? ` \`${p.id}\`${st}` : ""}${p.excerpt ? ` — ${p.excerpt}` : ""}`;
+  });
+  return {
+    ok: true,
+    agent_report:
+      `**solanaagent.app public feed** (watch-only) — **${posts.length}** entr${posts.length === 1 ? "y" : "ies"} (limit=${limit}).\n\n` +
+      (lines.length ? lines.join("\n") : "_(No entries parsed.)_") +
+      `\n\n_To publish, use **bulletin_post** (paid flow on-chain)._`,
+    summary: { total_returned: posts.length, limit },
+    posts_preview: previews,
+    endpoint: res.path,
+  };
+}
+
+async function toolBulletinPublicHealth() {
+  const res = await fetchSolanaAgentRead("/api/v1/bulletin/health");
+  if (!res.httpOk) {
+    const err = res.data?.error || res.data?.message || `HTTP ${res.status}`;
+    return {
+      ok: false,
+      error: err,
+      agent_report: `**solanaagent.app feed service health** — failed (${res.status}). ${err}`,
+      endpoint: res.path,
+    };
+  }
+  const d = res.data || {};
+  const bits = [];
+  if (d.status) bits.push(`status: **${d.status}**`);
+  if (d.ok != null) bits.push(`ok: **${d.ok}**`);
+  if (d.version) bits.push(`version: ${d.version}`);
+  const detail = bits.length ? bits.join(" · ") : JSON.stringify(d).slice(0, 280);
+  return {
+    ok: true,
+    agent_report: `**solanaagent.app feed service** — ${detail}\n\n_Source: [API](https://www.solanaagent.app/api.html)_`,
+    summary: d,
+    endpoint: res.path,
+  };
+}
+
+/** Lamports beyond bulletin payment for tx fee + memo (conservative). */
+const BULLETIN_FEE_RESERVE_LAMPORTS = 1_000_000;
+
+async function checkBulletinWalletFunding(amount_lamports, env) {
+  const amt = Number(amount_lamports);
+  if (!Number.isFinite(amt) || amt <= 0) {
+    return { ok: false, stage: "balance", error: "Invalid payment amount for balance check." };
+  }
+  const bal = await solana.solanaBalance({}, env);
+  if (!bal.ok) {
+    return { ok: false, stage: "balance", error: bal.error || "Could not read app wallet balance." };
+  }
+  const need = BigInt(amt) + BigInt(BULLETIN_FEE_RESERVE_LAMPORTS);
+  if (BigInt(bal.lamports) < need) {
+    const needSol = Number(need) / 1e9;
+    return {
+      ok: false,
+      stage: "balance",
+      error:
+        `Insufficient SOL for bulletin post: wallet has ${bal.lamports} lamports (~${(bal.lamports / 1e9).toFixed(6)} SOL), ` +
+        `need at least ${need} lamports (~${needSol.toFixed(6)} SOL) = payment ${amt} lamports (~${(amt / 1e9).toFixed(4)} SOL) + fee reserve.`,
+      balance_lamports: bal.lamports,
+      required_lamports: Number(need),
+      payment_lamports: amt,
+    };
+  }
+  return { ok: true, balance_lamports: bal.lamports };
+}
+
+/**
+ * Autonomous Clawstr post (solanaagent.app): create/reuse payment intent, verify wallet balance (payment + reserve),
+ * transfer SOL with memo, POST /bulletin/post with tx_signature. No human sidebar step.
+ */
+async function runBulletinAutonomousPostCore(args, env) {
+  const content = String(args?.content || "").trim();
+  if (!content) return { ok: false, stage: "validate", error: "content is required" };
+
+  let intent = latestBulletinIntent;
+  if (!intent?.payment_intent?.id || !intent?.payment?.treasury_solana_address || !intent?.payment?.amount_lamports || !intent?.payment?.reference) {
+    const walletAddress = (args?.wallet_address || getSolanaPublicKeyFromConfig() || "").trim();
+    if (!walletAddress) {
+      return { ok: false, stage: "intent", error: "No pending bulletin intent and no configured app wallet (or pass wallet_address)." };
+    }
+    const created = await bulletinCreatePaymentIntent(walletAddress);
+    if (!created.ok || !created.data?.payment_intent || !created.data?.payment) {
+      return {
+        ok: false,
+        stage: "intent",
+        status: created.status,
+        error: created?.data?.error || "Failed to create payment intent.",
+      };
+    }
+    intent = { payment_intent: created.data.payment_intent, payment: created.data.payment };
+    latestBulletinIntent = intent;
+  }
+
+  const payment_intent_id = intent.payment_intent.id;
+  const treasury_solana_address = intent.payment.treasury_solana_address;
+  const amount_lamports = Number(intent.payment.amount_lamports);
+  const reference = intent.payment.reference;
+  if (!payment_intent_id || !treasury_solana_address || !Number.isFinite(amount_lamports) || amount_lamports <= 0 || !reference) {
+    return { ok: false, stage: "validate", error: "Invalid payment intent fields from server." };
+  }
+
+  const funded = await checkBulletinWalletFunding(amount_lamports, env);
+  if (!funded.ok) return funded;
+
+  const transfer = await sendSolTransferWithMemo({ to: treasury_solana_address, lamports: amount_lamports, memo: reference });
+  if (!transfer.ok) {
+    return { ok: false, stage: "transfer", error: transfer.error, transfer };
+  }
+  const post = await bulletinCreatePost(payment_intent_id, content, transfer.signature);
+  if (!post.ok) {
+    return {
+      ok: false,
+      stage: "post",
+      status: post.status,
+      error: post?.data?.error || `Post failed (${post.status})`,
+      payment_intent_id,
+      transfer,
+      post,
+    };
+  }
+  latestBulletinIntent = null;
+  return {
+    ok: true,
+    stage: "posted",
+    payment_intent_id,
+    tx_signature: transfer.signature,
+    nostr_event_id: post?.data?.post?.nostr_event_id || null,
+    transfer,
+    post,
+  };
 }
 
 const solanaFromConfig = getSolanaKeypairFromConfig();
@@ -2152,6 +2769,114 @@ const server = createServer(async (req, res) => {
     }
     return;
   }
+
+  if (path === "/api/bulletin/payment-intent" && req.method === "POST") {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    try {
+      const parsed = body ? JSON.parse(body) : {};
+      const walletAddress = (parsed?.wallet_address || getSolanaPublicKeyFromConfig() || "").trim();
+      if (!walletAddress) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "wallet_address is required and no app wallet is configured." }));
+        return;
+      }
+      const out = await bulletinCreatePaymentIntent(walletAddress);
+      if (out.ok && out.data?.payment_intent && out.data?.payment) {
+        latestBulletinIntent = {
+          payment_intent: out.data.payment_intent,
+          payment: out.data.payment,
+        };
+      }
+      res.writeHead(out.ok ? 200 : out.status || 500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(out.data || { ok: false, error: "Payment intent failed" }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message || String(e) }));
+    }
+    return;
+  }
+
+  if (path === "/api/bulletin/payment-intent/latest" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, latest: latestBulletinIntent }));
+    return;
+  }
+
+  if (path === "/api/bulletin/approve-and-post" && req.method === "POST") {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    try {
+      const parsed = body ? JSON.parse(body) : {};
+      const payment_intent_id = (parsed?.payment_intent_id || "").trim();
+      const treasury_solana_address = (parsed?.treasury_solana_address || "").trim();
+      const amount_lamports = Number(parsed?.amount_lamports || 0);
+      const reference = (parsed?.reference || "").trim();
+      const content = String(parsed?.content || "").trim();
+      if (!payment_intent_id || !treasury_solana_address || !amount_lamports || !reference || !content) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "payment_intent_id, treasury_solana_address, amount_lamports, reference, and content are required",
+          })
+        );
+        return;
+      }
+
+      const funding = await checkBulletinWalletFunding(amount_lamports, {});
+      if (!funding.ok) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, stage: "balance", error: funding.error, ...funding }));
+        return;
+      }
+
+      const transfer = await sendSolTransferWithMemo({
+        to: treasury_solana_address,
+        lamports: amount_lamports,
+        memo: reference,
+      });
+      if (!transfer.ok) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, stage: "transfer", error: transfer.error, transfer }));
+        return;
+      }
+
+      const post = await bulletinCreatePost(payment_intent_id, content, transfer.signature);
+      if (!post.ok) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            stage: "post",
+            error: post?.data?.error || `Post failed (${post.status})`,
+            transfer,
+            post,
+          })
+        );
+        return;
+      }
+
+      latestBulletinIntent = null;
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: true,
+          stage: "posted",
+          payment_intent_id,
+          tx_signature: transfer.signature,
+          nostr_event_id: post?.data?.post?.nostr_event_id || null,
+          transfer,
+          post,
+        })
+      );
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message || String(e) }));
+    }
+    return;
+  }
   if (path === "/api/config" && req.method === "POST") {
     const remote = req.socket.remoteAddress || "";
     if (remote !== "127.0.0.1" && remote !== "::1" && !remote.endsWith("127.0.0.1")) {
@@ -2366,24 +3091,52 @@ const server = createServer(async (req, res) => {
       const suggestsAccount = /\b(account|balance|wallet|address|transfer|send .* (eth|matic|pol|token)|tx history|transaction history|my balance|check balance|provide .* balance)/i.test(lastUserContent);
       const suggestsSolana = /\b(solana|SOL)\b|sol balance|solana (balance|address|transfer|wallet)/i.test(lastUserContent);
       const suggestsSwap = /\b(swap|usdc|usdt|intent_id|intent\b|jupiter|slippage|prepare|confirm)\b/i.test(lastUserContent);
+      const suggestsBulletin =
+        /\b(bulletin|clawstr|claw\s*str|solanaagent|paid\s*post|payment_intent|nostr)\b/i.test(lastUserContent);
       const suggestsMemory = /\b(what did we discuss|past conversation|search .* conversation|find .* conversation|conversation about|we talked about|remember when|previous chat|old conversation|search (past |our )?conversations)/i.test(lastUserContent);
       const suggestsExec = /\b(run|execute|script|node\s|python3?\s|npm\s|npx\s|sandbox)\b/i.test(lastUserContent);
       const hasToolUseInHistory = messages.some((m) => m.tool_calls && m.tool_calls.length > 0);
       const conversationMentionsSwap = messages.some((m) => /intent_id|jupiter_swap|Prepared swap|min.?out|confirm.*swap/i.test((m.content || "")));
-      const sendTools = messages.length === 1 || hasToolUseInHistory || conversationMentionsSwap || suggestsBrowse || suggestsAccount || suggestsSolana || suggestsSwap || suggestsMemory || suggestsExec;
+      const conversationMentionsBulletin = messages.some((m) =>
+        /\b(bulletin|bulletin_post|clawstr|payment_intent|solanaagent\.app\/api\/v1\/bulletin)/i.test(m.content || "")
+      );
+      const sendTools =
+        messages.length === 1 ||
+        hasToolUseInHistory ||
+        conversationMentionsSwap ||
+        conversationMentionsBulletin ||
+        suggestsBrowse ||
+        suggestsAccount ||
+        suggestsSolana ||
+        suggestsSwap ||
+        suggestsBulletin ||
+        suggestsMemory ||
+        suggestsExec;
       if (sendTools) {
         const workspaceText = loadWorkspace();
         const walletRule = "Wallet: use solana_balance and solana_address only. There are no account_balance or account_address tools—call solana_balance for balance, solana_address for address.\n\n";
+        const bulletinRule =
+          suggestsBulletin || conversationMentionsBulletin
+            ? "solanaagent.app Clawstr: publish in one step with bulletin_post + content (balance check, pay, post; no sidebar step). bulletin_approve_and_post is an alias. Use bulletin_create_payment_intent only if you need the intent without posting yet; bulletin_get_latest_intent reads the server cache. " +
+              "Read-only public APIs: clawstr_health, clawstr_feed, clawstr_communities, bulletin_public_feed, bulletin_public_health — prefer the tool result field agent_report for user-facing text. " +
+              "The URL https://www.solanaagent.app/api/v1/bulletin/payment-intent requires HTTP POST with JSON {\"wallet_address\":\"<pubkey>\"}; GET and curl without -X POST return 404 and are not a valid health check.\n\n"
+            : "";
+        const reportingRule =
+          "Execution reporting contract:\n" +
+          "- You may report action outcomes ONLY from tool result objects present in this turn.\n" +
+          "- If a tool result is missing/failed/blocked, STOP and report that exact error. Do not continue the flow.\n" +
+          "- Never invent tx signatures, intent IDs, payment IDs, post IDs, or event IDs.\n" +
+          "- If tool mode is simulated, state clearly that no live transaction occurred.\n\n";
         if (workspaceText) {
           currentMessages = [
-            { role: "system", content: walletRule + "Your workspace (read and follow):\n\n" + workspaceText },
+            {
+              role: "system",
+              content: walletRule + bulletinRule + reportingRule + "Your workspace (read and follow):\n\n" + workspaceText,
+            },
             ...currentMessages,
           ];
         } else {
-          currentMessages = [
-            { role: "system", content: walletRule },
-            ...currentMessages,
-          ];
+          currentMessages = [{ role: "system", content: walletRule + bulletinRule + reportingRule }, ...currentMessages];
         }
       }
 
@@ -2443,7 +3196,15 @@ const server = createServer(async (req, res) => {
         if (!msg) {
           db.insertTokenUsage(conversationId, accumulatedUsage, turns);
           res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ...data, conversation_id: conversationId, tool_results: toolResultsForFrontend, usage: accumulatedUsage }));
+          res.end(
+            JSON.stringify({
+              ...data,
+              conversation_id: conversationId,
+              tool_results: toolResultsForFrontend,
+              tool_verification: summarizeToolVerification(toolResultsForFrontend),
+              usage: accumulatedUsage,
+            })
+          );
           return;
         }
 
@@ -2468,6 +3229,7 @@ const server = createServer(async (req, res) => {
             ...data,
             conversation_id: conversationId,
             tool_results: toolResultsForFrontend.length ? toolResultsForFrontend : undefined,
+            tool_verification: summarizeToolVerification(toolResultsForFrontend),
             usage: accumulatedUsage,
           };
           if (assistantContent && payload.choices?.[0]?.message)
@@ -2477,20 +3239,53 @@ const server = createServer(async (req, res) => {
           return;
         }
 
+        let blockedReceipt = null;
         for (const tc of toolCalls) {
           const name = tc.function?.name;
           let args = {};
           try {
             args = JSON.parse(tc.function?.arguments ?? "{}");
           } catch {}
-          const result = await runTool(name, args, env);
-          const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+          const rawResult = await runTool(name, args, env);
+          const receipt = normalizeToolResult(name, args, rawResult);
+          const result = receipt.result;
+          const resultStr = JSON.stringify(result);
           currentMessages.push({
             role: "tool",
             tool_call_id: tc.id,
             content: resultStr,
           });
-          toolResultsForFrontend.push({ tool: name, id: tc.id, result });
+          toolResultsForFrontend.push({
+            tool: name,
+            id: tc.id,
+            source: receipt.source,
+            mode: receipt.mode,
+            status: receipt.status,
+            verification: receipt.verification,
+            result,
+          });
+          if (receipt.blocking) {
+            blockedReceipt = receipt;
+            break;
+          }
+        }
+        if (blockedReceipt) {
+          const blockedContent = buildBlockedToolMessage(blockedReceipt);
+          db.insertMessage(conversationId, "assistant", blockedContent, {
+            tool_results: toolResultsForFrontend.length ? toolResultsForFrontend : undefined,
+          });
+          db.insertTokenUsage(conversationId, accumulatedUsage, turns);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              choices: [{ message: { role: "assistant", content: blockedContent } }],
+              conversation_id: conversationId,
+              tool_results: toolResultsForFrontend.length ? toolResultsForFrontend : undefined,
+              tool_verification: summarizeToolVerification(toolResultsForFrontend),
+              usage: accumulatedUsage,
+            })
+          );
+          return;
         }
       }
 
@@ -2509,6 +3304,7 @@ const server = createServer(async (req, res) => {
         choices: [{ message: { role: "assistant", content: lastContent } }],
         conversation_id: conversationId,
         tool_results: toolResultsForFrontend,
+        tool_verification: summarizeToolVerification(toolResultsForFrontend),
         usage: accumulatedUsage,
       }));
     } catch (e) {

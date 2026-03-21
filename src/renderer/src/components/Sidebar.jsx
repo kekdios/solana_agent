@@ -1,6 +1,14 @@
 import { useState, useEffect } from "react";
 import { useChatStore } from "../store/chatStore";
 
+function lamportsToSolText(lamports) {
+  const n = Number(lamports);
+  if (!Number.isFinite(n) || n < 0) return "";
+  const sol = n / 1e9;
+  const decimals = n >= 10_000_000 ? 4 : 6;
+  return ` (~${sol.toFixed(decimals)} SOL)`;
+}
+
 export default function Sidebar() {
   const conversations = useChatStore((s) => s.conversations);
   const currentConversationId = useChatStore((s) => s.currentConversationId);
@@ -19,12 +27,23 @@ export default function Sidebar() {
   const latestSwapState = useChatStore((s) => s.latestSwapState);
   const executeLatestPreparedSwap = useChatStore((s) => s.executeLatestPreparedSwap);
   const solanaNetwork = useChatStore((s) => s.solanaNetwork);
+  const bulletinIntent = useChatStore((s) => s.bulletinIntent);
+  const bulletinLastOutcome = useChatStore((s) => s.bulletinLastOutcome);
+  const fetchLatestBulletinIntent = useChatStore((s) => s.fetchLatestBulletinIntent);
 
   const [historyOpen, setHistoryOpen] = useState(false);
 
   useEffect(() => {
     if (historyOpen) fetchSessions();
   }, [historyOpen, fetchSessions]);
+
+  useEffect(() => {
+    fetchLatestBulletinIntent();
+    const id = setInterval(() => {
+      fetchLatestBulletinIntent();
+    }, 3000);
+    return () => clearInterval(id);
+  }, [fetchLatestBulletinIntent]);
 
   const handleLoadSession = (id) => {
     loadSession(id);
@@ -292,6 +311,64 @@ export default function Sidebar() {
           )}
         </div>
       )}
+      <div className="shrink-0 px-3 py-2 border-t border-[#1e1e24] bg-black/30 space-y-1">
+        <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Clawstr (solanaagent.app)</p>
+        <p className="text-[10px] text-slate-500 leading-snug">
+          Ask in chat to publish on solanaagent.app (Clawstr). The agent runs the paid flow—wallet check, payment, then publish—in one step. There is no post button here; this panel only shows the latest outcome for this chat.
+        </p>
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="text-slate-400">Status</span>
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${
+              bulletinLastOutcome?.ok === true
+                ? "bg-emerald-500/20 text-emerald-300"
+                : bulletinLastOutcome?.ok === false
+                ? "bg-red-500/20 text-red-300"
+                : "bg-white/5 text-slate-300"
+            }`}
+          >
+            {bulletinLastOutcome?.ok === true ? "Posted" : bulletinLastOutcome?.ok === false ? "Failed" : "—"}
+          </span>
+        </div>
+        {bulletinLastOutcome?.ok === true && (
+          <>
+            {bulletinLastOutcome.tx_signature && (
+              <a
+                href={`https://solscan.io/tx/${encodeURIComponent(bulletinLastOutcome.tx_signature)}${
+                  solanaNetwork === "devnet" ? "?cluster=devnet" : solanaNetwork === "testnet" ? "?cluster=testnet" : ""
+                }`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block text-[11px] text-emerald-300 hover:text-emerald-200 underline break-all"
+              >
+                Tx: {bulletinLastOutcome.tx_signature}
+              </a>
+            )}
+            {bulletinLastOutcome.nostr_event_id && (
+              <p className="text-[11px] text-emerald-300/90 break-all">Nostr: {bulletinLastOutcome.nostr_event_id}</p>
+            )}
+          </>
+        )}
+        {bulletinLastOutcome?.ok === false && bulletinLastOutcome.error && (
+          <div className="text-[11px] text-red-300 break-words space-y-0.5">
+            <p className="font-medium text-red-200">Error</p>
+            <p className="whitespace-pre-wrap text-red-200/90">{bulletinLastOutcome.error}</p>
+            {bulletinLastOutcome.stage ? (
+              <p className="text-slate-500 font-mono text-[10px]">stage: {bulletinLastOutcome.stage}</p>
+            ) : null}
+          </div>
+        )}
+        {bulletinLastOutcome == null && (
+          <p className="text-[11px] text-slate-500">No solanaagent.app post result in this chat yet.</p>
+        )}
+        {bulletinIntent?.payment_intent?.id ? (
+          <p className="text-[10px] text-slate-500 pt-1 border-t border-white/5">
+            Server pending intent:{" "}
+            <span className="font-mono text-slate-400">{bulletinIntent.payment_intent.id}</span>
+            <span className="text-slate-600">{lamportsToSolText(bulletinIntent?.payment?.amount_lamports)}</span>
+          </p>
+        ) : null}
+      </div>
       <div className="shrink-0 px-3 py-2 border-t border-[#1e1e24] space-y-1">
         <a
           href="https://solanaagent.app"

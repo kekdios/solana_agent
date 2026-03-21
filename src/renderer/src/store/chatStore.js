@@ -56,6 +56,15 @@ export const useChatStore = create((set, get) => ({
   sovereignTx: null,
   /** Local state for latest prepared swap execution (for Execute Swap button). */
   latestSwapState: { executing: false, executed: false, error: null, signature: null },
+  /** Latest bulletin payment intent for one-click pay-and-post (on-chain; no admin token). */
+  bulletinIntent: null,
+  /** Bulletin one-click execution state (legacy / manual API). */
+  bulletinState: { executing: false, executed: false, error: null, tx_signature: null, nostr_event_id: null, stage: "idle" },
+  /** Last autonomous bulletin_post / bulletin_approve_and_post outcome in this chat (sidebar). */
+  bulletinLastOutcome: null,
+  /** Default bulletin post draft used by one-click panel. */
+  bulletinDraft:
+    "Thrilled to test Clawstr's open magic: any agent can post without signup, just keys + relays + ideas. No gatekeepers, just participation. #Clawstr #SolanaAgent #AgentFreedom",
 
   setApiBase: (base) => set({ apiBase: base || "" }),
 
@@ -179,6 +188,37 @@ export const useChatStore = create((set, get) => ({
       let assistantContent = data.choices?.[0]?.message?.content ?? "";
       const toolResults = data.tool_results || [];
       const sovereignResult = toolResults.find((tr) => tr.tool === "sovereign_transaction")?.result || null;
+      const bulletinFromTools =
+        toolResults
+          .map((tr) => tr?.result)
+          .find((r) => r && typeof r === "object" && r.payment_intent && r.payment) || null;
+
+      let bulletinLastOutcome = get().bulletinLastOutcome;
+      const bulletinPostTr = [...toolResults].reverse().find(
+        (tr) => tr?.tool === "bulletin_post" || tr?.tool === "bulletin_approve_and_post"
+      );
+      const br = bulletinPostTr?.result;
+      if (br && typeof br === "object") {
+        if (br.ok === true && br.stage === "posted") {
+          bulletinLastOutcome = {
+            ok: true,
+            error: null,
+            stage: "posted",
+            tx_signature: br.tx_signature || null,
+            nostr_event_id: br.nostr_event_id || null,
+            payment_intent_id: br.payment_intent_id || null,
+          };
+        } else if (br.ok === false || br.error) {
+          bulletinLastOutcome = {
+            ok: false,
+            error: br.error || "Bulletin post failed",
+            stage: br.stage || "failed",
+            tx_signature: null,
+            nostr_event_id: null,
+            payment_intent_id: br.payment_intent_id || null,
+          };
+        }
+      }
       if (toolResults.length > 0) {
         const toolResultsText = toolResults
           .map((tr) => {
@@ -208,6 +248,8 @@ export const useChatStore = create((set, get) => ({
         sessionTokenTotal: prevSession + sessionAdd,
         sovereignTx: sovereignResult || prevSov || null,
         latestSwapState: sovereignResult ? latestSwapState : get().latestSwapState,
+        bulletinIntent: bulletinFromTools || get().bulletinIntent,
+        bulletinLastOutcome,
       });
       saveLastConversationId(data.conversation_id ?? conversationId);
       if (!conversationId) get().fetchConversations();
@@ -238,7 +280,15 @@ export const useChatStore = create((set, get) => ({
 
   newChat: () => {
     saveLastConversationId(null);
-    set({ currentConversationId: null, messages: [], error: null, sessionTokenTotal: 0 });
+    set({
+      currentConversationId: null,
+      messages: [],
+      error: null,
+      sessionTokenTotal: 0,
+      bulletinIntent: null,
+      bulletinState: { executing: false, executed: false, error: null, tx_signature: null, nostr_event_id: null, stage: "idle" },
+      bulletinLastOutcome: null,
+    });
     const base = get().apiBase || "";
     if (base) fetch(`${base}/api/jupiter/swap/clear-expired`, { method: "POST" }).catch(() => {});
   },
@@ -304,6 +354,115 @@ export const useChatStore = create((set, get) => ({
           executed: false,
           error: e.message || "Execute failed",
           signature: null,
+        },
+      });
+    }
+  },
+
+  createBulletinPaymentIntent: async () => {
+    const { apiBase } = get();
+    const base = apiBase || "";
+    try {
+      const res = await fetch(`${base}/api/bulletin/payment-intent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.payment_intent || !data?.payment) {
+        throw new Error(data?.error || data?.error_code || `Payment intent failed (${res.status})`);
+      }
+      set({
+        bulletinIntent: data,
+        bulletinState: { executing: false, executed: false, error: null, tx_signature: null, nostr_event_id: null, stage: "intent_ready" },
+      });
+      return data;
+    } catch (e) {
+      set({
+        bulletinState: {
+          executing: false,
+          executed: false,
+          error: e.message || "Payment intent failed",
+          tx_signature: null,
+          nostr_event_id: null,
+          stage: "intent_failed",
+        },
+      });
+      throw e;
+    }
+  },
+
+  fetchLatestBulletinIntent: async () => {
+    const { apiBase } = get();
+    const base = apiBase || "";
+    try {
+      const res = await fetch(`${base}/api/bulletin/payment-intent/latest`);
+      const data = await res.json();
+      if (data?.ok) {
+        const latest = data.latest || null;
+        set((state) => ({
+          bulletinIntent: latest,
+          bulletinState:
+            !latest && !state.bulletinState.executing && !state.bulletinState.executed
+              ? { ...state.bulletinState, stage: "idle" }
+              : state.bulletinState,
+        }));
+      }
+    } catch (_) {
+      // ignore polling failures
+    }
+  },
+
+  executeBulletinOneClick: async () => {
+    const { apiBase, bulletinIntent, bulletinDraft } = get();
+    const base = apiBase || "";
+    set({ bulletinState: { executing: true, executed: false, error: null, tx_signature: null, nostr_event_id: null, stage: "starting" } });
+    try {
+      let intent = bulletinIntent;
+      if (!intent?.payment_intent || !intent?.payment) {
+        set({ bulletinState: { executing: true, executed: false, error: null, tx_signature: null, nostr_event_id: null, stage: "creating_intent" } });
+        intent = await get().createBulletinPaymentIntent();
+      }
+      const payment_intent_id = intent?.payment_intent?.id;
+      const treasury_solana_address = intent?.payment?.treasury_solana_address;
+      const amount_lamports = intent?.payment?.amount_lamports;
+      const reference = intent?.payment?.reference;
+      if (!payment_intent_id || !treasury_solana_address || !amount_lamports || !reference) {
+        throw new Error("Missing payment intent fields for approval.");
+      }
+      set({ bulletinState: { executing: true, executed: false, error: null, tx_signature: null, nostr_event_id: null, stage: "approving_transfer" } });
+      const res = await fetch(`${base}/api/bulletin/approve-and-post`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payment_intent_id,
+          treasury_solana_address,
+          amount_lamports,
+          reference,
+          content: bulletinDraft,
+        }),
+      });
+      const data = await res.json();
+      if (!data?.ok) throw new Error(data?.error || "Approve-and-post failed");
+      set({
+        bulletinState: {
+          executing: false,
+          executed: true,
+          error: null,
+          tx_signature: data.tx_signature || null,
+          nostr_event_id: data.nostr_event_id || null,
+          stage: "posted",
+        },
+      });
+    } catch (e) {
+      set({
+        bulletinState: {
+          executing: false,
+          executed: false,
+          error: e.message || "Approve-and-post failed",
+          tx_signature: null,
+          nostr_event_id: null,
+          stage: "failed",
         },
       });
     }

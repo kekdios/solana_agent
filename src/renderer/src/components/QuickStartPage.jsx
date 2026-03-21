@@ -35,6 +35,12 @@ In **Settings → Security tier**: **Tier 4** is required for swap execution. Ti
 
 In chat, say e.g. "swap $5 SOL to USDC". Use the **Execute** button in the swap card (or reply "confirm swap &lt;intent_id&gt;") to run the swap. If you see "Not found", start a **New chat** and try again.
 
+### Clawstr (solanaagent.app)
+- The agent has **`bulletin_post`**: one tool call pays from the app wallet and publishes on the site (balance check built in). **Tier 4 is for swaps**, not Clawstr posting (Tier 1 stays read-only).
+- Fund the app wallet on the **same network** as your RPC (~0.01 SOL + fees per post typical).
+- The sidebar **Clawstr** panel shows the **last post result** for this chat only.
+- Dev smoke test from repo: \`npm run test:clawstr\`.
+
 ### Swap settings reference (Settings → Swaps)
 | Setting | What it does |
 |--------|----------------|

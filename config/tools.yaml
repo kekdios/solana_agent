@@ -263,6 +263,51 @@ tools:
       Remove expired and stale swap intents from the DB (prepared/confirmed/expired/cancelled that are past their expiry). Keeps succeeded/failed for audit. Call when the user says "clear old transactions", "clear old swap intents", or after a new chat so old intents don't cause "Not found". Returns deleted count.
     enabled: true
 
+  - name: bulletin_create_payment_intent
+    description: |
+      Create a paid posting intent on solanaagent.app (Clawstr publish flow). Pass optional wallet_address; defaults to app wallet from Settings. Returns payment_intent.id plus payment.treasury_solana_address, payment.amount_lamports, and payment.reference. The live API is POST-only at /api/v1/bulletin/payment-intent—GET returns 404; do not treat that as unavailable.
+    enabled: true
+
+  - name: bulletin_get_latest_intent
+    description: |
+      Read the latest pending local bulletin payment intent cached by this app runtime. Useful for sidebar/UI continuity and factual state checks.
+    enabled: true
+
+  - name: bulletin_post
+    description: |
+      Publish on solanaagent.app Clawstr: single tool call pays from the app wallet and sends content—no human sidebar step. No separate security-tier lock beyond normal tool tiers (Tier 1 read-only still cannot run this). Before sending SOL, verifies wallet balance ≥ payment (typically 0.01 SOL / 10_000_000 lamports) plus a fee reserve. Creates a payment intent if none is cached, transfers with memo, POSTs /api/v1/bulletin/post with payment_intent_id, content, and tx_signature. Returns ok true with tx_signature and nostr_event_id, or ok false with stage (balance|intent|transfer|post|validate) and error.
+    enabled: true
+
+  - name: bulletin_approve_and_post
+    description: |
+      Alias of bulletin_post (same behavior). Prefer bulletin_post in new prompts.
+    enabled: true
+
+  - name: clawstr_health
+    description: |
+      Read-only: GET solanaagent.app /api/v1/clawstr/health — Nostr bridge status, public npub, whether signing is configured (see site API reference). Returns ok, agent_report (markdown-ready summary for the user), summary. Tier-safe read.
+    enabled: true
+
+  - name: clawstr_feed
+    description: |
+      Read-only: GET /api/v1/clawstr/feed — kind 1111 posts from the solanaagent Clawstr subclaw. Optional limit (max 100), ai_only (NIP-32 AI-tagged posts). Returns agent_report with numbered excerpts, posts_preview, summary. Use for "what's on Clawstr", "latest Nostr posts", feed samples.
+    enabled: true
+
+  - name: clawstr_communities
+    description: |
+      Read-only: GET /api/v1/clawstr/communities — curated community list for solanaagent.app panels. Returns agent_report and summary.count.
+    enabled: true
+
+  - name: bulletin_public_feed
+    description: |
+      Read-only: GET /api/v1/bulletin/feed — public solanaagent.app feed (watch-only; not posting). Optional limit. Returns agent_report with post excerpts; to publish use bulletin_post.
+    enabled: true
+
+  - name: bulletin_public_health
+    description: |
+      Read-only: GET /api/v1/bulletin/health — solanaagent.app feed service status. Returns agent_report and summary.
+    enabled: true
+
   - name: drift_perp_price
     description: Get SOL-PERP mark price (USD). Uses Jupiter SOL price as proxy. Optional market_index (default 0).
     module: ./tools/drift.js

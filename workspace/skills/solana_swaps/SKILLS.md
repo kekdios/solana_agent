@@ -22,6 +22,9 @@ Trigger when the user says: "swap", "sell SOL", "convert SOL to USDC", "go to ca
 - **Always** call `jupiter_swap_prepare` for swap requests. Never describe a prepared swap without calling the tool first.
 - **Never** proceed to execution without a real `intent_id` from a prepare tool response.
 - Report only what the tools return. If prepare fails, say so; do not invent success.
+- **No result, no progress:** if any step returns `ok:false`, `error`, or verification failure, stop at that step and report the raw failure. Do not continue the flow.
+- **Proof fields must be full values:** never abbreviate signatures/addresses/intent IDs when reporting execution results.
+- **Simulated mode disclosure:** if a result is dry-run/simulated/stub, explicitly say no live on-chain action occurred.
 
 **If tools fail**  
 Say: *"I cannot execute this swap without the swap tools."* Do **not** simulate.

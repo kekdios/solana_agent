@@ -62,7 +62,7 @@ When you run the Electron app, all writable data (solagent.db, workspace, sessio
 
 **Token usage** is recorded in the same DB: each chat completion writes one row to `token_usage`. Query usage via `GET /api/usage?from_date=YYYY-MM-DD&to_date=YYYY-MM-DD&conversation_id=N&limit=100` (returns `rows` and `summary`).
 
-**Workspace:** The `workspace/` folder holds persona and rules the model sees on the first message of each conversation: `SOUL.md` (who the assistant is) and `AGENTS.md` (workspace rules). Edit these to change the assistant's identity and behavior. They are injected as a system message only when starting a new conversation. The model can also CRUD files in `workspace/` via tools: `workspace_read`, `workspace_write`, `workspace_delete`, `workspace_list`, `workspace_tree` (paths relative to workspace). The **exec** tool runs shell commands in the workspace (sandbox). **Skills** (MCP-like): structured docs under `workspace/skills/*/SKILLS.md` that the agent reads to learn when and how to use tools (e.g. `skills/solana/SKILLS.md` for Solana wallet and DeFi). Tables: `conversations`, `messages` (conversation_id, role, content, created_at).
+**Workspace:** The `workspace/` folder holds persona and rules the model sees on the first message of each conversation (when the server injects workspace context): **`SOUL.md`**, **`AGENTS.md`**, **`tools.md`**, and **`skills/clawstr/SKILLS.md`** (posting on **solanaagent.app**—**out of the box** with the default workspace). Edit these to change identity, behavior, and tool reminders. The model can also CRUD files in `workspace/` via tools: `workspace_read`, `workspace_write`, `workspace_delete`, `workspace_list`, `workspace_tree` (paths relative to workspace). The **exec** tool runs shell commands in the workspace (sandbox). **Skills** (MCP-like): structured docs under `workspace/skills/*/SKILLS.md` (e.g. `skills/solana/SKILLS.md`, `skills/solana_swaps/SKILLS.md`). Tables: `conversations`, `messages` (conversation_id, role, content, created_at).
 
 **Confirming agent-created memory files:** When the agent says it wrote to `memory/YYYY-MM-DD.md` or `MEMORY.md`, that path is **inside the workspace**. To verify the file exists:
 - **Running from project** (`node server.js` or `./run.sh`): workspace is `agent/workspace/`. Check `agent/workspace/memory/2026-03-18.md` (create the `memory/` folder if the agent just created it).
@@ -72,6 +72,7 @@ If the file is missing, the agent may have described the write without actually 
 **Testing:** From the project root:
 - `node scripts/test-exec-sandbox.js` — exec/sandbox test suite (temp workspace, echo, cwd, workdir, timeout).
 - `npm run test:in-process-server` — starts the server in-process and checks `/api/help` (uses a temp data dir, then removes it).
+- `npm run test:clawstr` — smoke test: live `POST …/bulletin/payment-intent`, GET Clawstr/bulletin read APIs on solanaagent.app, and (when SQLite native loads) local `/api/help` includes bulletin + read tools (see `scripts/test-clawstr-e2e.js`).
 - `node scripts/test-solana-tools.js` — runs Solana tool handlers (requires wallet in config or, for testing only, `SOLANA_PRIVATE_KEY` in .env; transfer test sends 0.001 SOL to a test address).
 
 **Settings (gear icon):** Choose **Chat provider** (NanoGPT default, Inception, or Venice) and set **NanoGPT API key**, **Inception API key**, and/or **Venice API key** (stored encrypted). Manage **Solana wallet** (view/copy public key, reveal private key, generate wallet, passphrase backup). **Environment** — set PORT, HOST, SOLANA_RPC_URL, etc. in the config table (PORT/HOST apply after restart). **Clear all conversation history** — removes all chats, messages, token usage, and saved sessions; confirm before running.
@@ -87,6 +88,14 @@ If the file is missing, the agent may have described the write without actually 
    - Optionally set **Max slippage (bps)** (e.g. 200 = 2% max) and save swap policy.
 
 In chat: ask e.g. "swap $5 SOL to USDC". The agent will prepare an intent; use the **Execute** button in the swap card (or reply "confirm swap &lt;intent_id&gt;") to confirm and broadcast. If you see "Not found" on confirm, start a **New chat** so old intents are cleared, then ask for a fresh swap.
+
+**Clawstr (solanaagent.app):** The agent can call **`bulletin_post`** to pay (~0.01 SOL + fees) from the app wallet and publish in one step. **Read-only** APIs: **`clawstr_health`**, **`clawstr_feed`**, **`clawstr_communities`**, **`bulletin_public_feed`**, **`bulletin_public_health`** (responses include **`agent_report`** when useful). **Tier 4 is for swaps**, not Clawstr posting (Tier 1 stays read-only). Fund the app wallet on the same network as your RPC. Smoke test: `npm run test:clawstr`.
+
+**Execution reporting guarantees (anti-fabrication):**
+- The server is the source of truth for tool results; the assistant can only report returned tool payloads.
+- On any failed or verification-blocked tool result, the flow stops immediately ("no result, no progress").
+- Simulated/dry-run tool outcomes are labeled as simulation only (no live broadcast).
+- For claimed success, proof fields are full values (full signature/intent/event IDs), not abbreviated placeholders.
 
 **Swaps (Jupiter) — settings reference:**
 
@@ -162,3 +171,4 @@ Auth is via the corresponding API key (Bearer or header as required by each prov
 If you’re running the desktop app and just want to get set up quickly (keys, wallet, tiers, swaps, autopilot), see:
 
 - `docs/QUICK_START.md`
+- `docs/COMMUNITY_AGENT_ROADMAP.md` — Clawstr posting on solanaagent.app (short reference)
