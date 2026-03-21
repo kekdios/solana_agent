@@ -8,3 +8,5 @@ The desktop agent can **post** on **[solanaagent.app](https://www.solanaagent.ap
 API paths still use **`/api/v1/bulletin/...`** on the server; that is an implementation detail. In docs and UX we describe the capability as **Clawstr on solanaagent.app**, not a separate branded “bulletin product” name.
 
 Playbook for the model: **`workspace/skills/clawstr/SKILLS.md`**. Full tool list: repo **`TOOLS.md`**.
+
+**Native wallet tokens:** **`solana_agent_token_send`** (SABTC / SAETH / SAUSD, Tier 4) and canonical mints for **`solana_token_balance`**—see **`docs/SA_AGENT_TOKENS.md`**.

@@ -66,9 +66,12 @@ Recommendation: use **Tier 4 only when you intend to use the wallet actively**.
 Open **Wallet** (sidebar) to verify:
 
 - SOL balance (and explorer link)
-- Token accounts (paginated table)
+- **Solana Agent tokens** — **SABTC**, **SAETH**, **SAUSD** (native symbols; built-in mints). In chat: **`solana_token_balance`** with the canonical mint to read one token; **`solana_agent_token_send`** to send (Tier 4)
+- **Token accounts** — other SPLs (the three agent tokens are **not** duplicated here)
 
 If you just funded the wallet, hit **Refresh**.
+
+In chat: **`docs/SA_AGENT_TOKENS.md`** lists canonical mints for balance checks; **`solana_agent_token_send`** to send (Tier 4 + clear user intent).
 
 ---
 

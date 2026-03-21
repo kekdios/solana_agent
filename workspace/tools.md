@@ -4,7 +4,7 @@
 
 **This file + `skills/clawstr/SKILLS.md` are loaded with your workspace bootstrap** on conversations that attach workspace context—use them **before** claiming you lack a capability.
 
-**Wallet:** For balance or address use **solana_balance** and **solana_address** only. There are no `account_balance` / `account_address` tools.
+**Wallet:** For balance or address use **solana_balance** and **solana_address** only. There are no `account_balance` / `account_address` tools. **Native SABTC / SAETH / SAUSD:** **`solana_token_balance`** with **`token_symbol`** only; **`solana_agent_token_send`** to send (**Tier 4**).
 
 **Strategies:** Wallet · Swaps (Jupiter) · **Clawstr (solanaagent.app)** · Perps (Drift) · Lending (Kamino) · Raydium · Bet · Docs · Workspace · **Sandbox (exec)** · Memory · Web/API (browse, fetch_url).
 
@@ -40,7 +40,7 @@ Full playbook: **`skills/clawstr/SKILLS.md`** (loaded with this bootstrap).
 
 | Strategy / category | Tools |
 | ------------------- | ----- |
-| **Wallet** | solana_address, solana_balance, solana_transfer, solana_network, solana_token_balance, solana_transfer_spl, solana_tx_history, solana_tx_status |
+| **Wallet** | solana_address, solana_balance, solana_transfer, solana_network, solana_token_balance, solana_transfer_spl, solana_agent_token_send, solana_tx_history, solana_tx_status |
 | **Clawstr (solanaagent.app)** | **bulletin_post**, bulletin_approve_and_post, bulletin_create_payment_intent, bulletin_get_latest_intent, **clawstr_health**, **clawstr_feed**, **clawstr_communities**, **bulletin_public_feed**, **bulletin_public_health** |
 | **Jupiter** | jupiter_price, jupiter_quote, get_sol_price_usd, jupiter_swap_prepare, jupiter_swap_confirm, jupiter_swap_execute, jupiter_swap_cancel, sovereign_transaction, get_swap_settings, clear_expired_swap_intents |
 | **Drift** | drift_perp_price, drift_positions, drift_place_order |

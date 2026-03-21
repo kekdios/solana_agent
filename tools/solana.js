@@ -3,12 +3,41 @@
  * RPC: SOLANA_RPC_URL (primary), SOLANA_RPC_FALLBACK.
  */
 
-import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL, Transaction } from "@solana/web3.js";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
+
+const SPL_TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const SPL_TOKEN_2022_PROGRAM_ID = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
+/** Normalize parsed token account for wallet list / balances (legacy + Token-2022). */
+function parsedTokenAccountToEntry(a) {
+  const info = a.account?.data?.parsed?.info;
+  const ta = info?.tokenAmount;
+  const mint = info?.mint;
+  if (!mint || !ta) return null;
+  const decimals = Number(ta.decimals) || 0;
+  const raw = ta.amount != null ? String(ta.amount) : "0";
+  let uiAmount = ta.uiAmount;
+  if (typeof uiAmount !== "number" || Number.isNaN(uiAmount)) {
+    const uis = ta.uiAmountString;
+    if (uis != null && uis !== "") {
+      const p = parseFloat(uis);
+      if (Number.isFinite(p)) uiAmount = p;
+    }
+  }
+  if (typeof uiAmount !== "number" || Number.isNaN(uiAmount)) {
+    try {
+      uiAmount = Number(BigInt(raw)) / 10 ** decimals;
+    } catch {
+      uiAmount = 0;
+    }
+  }
+  return { mint, amount: raw, decimals, uiAmount };
+}
 
 function getRpcUrl(env = {}) {
   const url =
@@ -21,6 +50,251 @@ function getRpcUrl(env = {}) {
 function getConnection(env = {}) {
   const url = getRpcUrl(env);
   return new Connection(url, { commitment: "confirmed" });
+}
+
+/** Strip whitespace, ZWSP, NBSP, line separators — models often paste broken mints. */
+export function sanitizeSolanaBase58Input(s) {
+  if (s == null) return "";
+  let t = String(s)
+    .trim()
+    .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, "")
+    .replace(/[\u2028\u2029]/g, "")
+    .replace(/[\u2018\u2019\u201C\u201D\u00AB\u00BB]/g, "")
+    .replace(/\s+/g, "");
+  // Trailing junk from copy-paste (e.g. mint; from "SABTC xxx; SAETH …" in descriptions)
+  t = t.replace(/^[`"'([\]]+/, "").replace(/[`"'),.;:\]]+$/g, "");
+  return t;
+}
+
+/** Max network fee (lamports) for auto-send without extra human approval — 0.001 SOL. */
+const MAX_AUTO_NETWORK_FEE_LAMPORTS = 1_000_000;
+
+function looksLikeBase58Mint(s) {
+  const t = String(s).trim();
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(t);
+}
+
+/**
+ * Parse SPL amount: prefer `amount` (raw integer string), else `amount_ui` decimal string/number.
+ */
+function parseTokenSendAmount(amountRaw, amountUi, decimals) {
+  if (typeof amountRaw === "number" && Number.isFinite(amountRaw) && amountRaw > 0) {
+    if (!Number.isInteger(amountRaw)) {
+      return { ok: false, error: "amount as number must be a positive integer (smallest token units)" };
+    }
+    amountRaw = String(amountRaw);
+  }
+  if (amountRaw != null && String(amountRaw).trim() !== "") {
+    const s = String(amountRaw).trim();
+    if (!/^\d+$/.test(s) || BigInt(s) <= 0n) {
+      return { ok: false, error: "amount must be a positive integer string (smallest token units)" };
+    }
+    return { ok: true, raw: BigInt(s) };
+  }
+  if (amountUi == null || amountUi === "") {
+    return { ok: false, error: "Provide amount (smallest units as string) or amount_ui (decimal token amount)" };
+  }
+  const uiStr = String(amountUi).trim();
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(uiStr);
+  if (!m) return { ok: false, error: "Invalid amount_ui; use e.g. 1.5 or 100" };
+  const intPart = m[1] || "0";
+  let frac = m[2] || "";
+  if (frac.length > decimals) {
+    return { ok: false, error: `amount_ui exceeds token decimals (${decimals})` };
+  }
+  frac = frac.padEnd(decimals, "0");
+  const combined = intPart + frac;
+  const raw = BigInt(combined);
+  if (raw <= 0n) return { ok: false, error: "amount_ui must be positive" };
+  return { ok: true, raw };
+}
+
+/**
+ * Send a **native** Solana Agent SPL token by symbol (**SABTC**, **SAETH**, **SAUSD**).
+ * Canonical mints are supplied by the server via env.saAgentTokenMap (built-in defaults; Settings can override).
+ * Rejects if estimated base network fee exceeds 0.001 SOL. Checks token + SOL (fee + optional ATA rent) before sending.
+ */
+export async function solanaAgentTokenSend(args, env = {}) {
+  const tokenSymbol = String(args?.token_symbol ?? args?.token ?? "")
+    .trim()
+    .toUpperCase();
+  const to = String(args?.to ?? "").trim();
+  if (!tokenSymbol) {
+    return { ok: false, error: "token_symbol required (e.g. SABTC, SAETH, SAUSD)" };
+  }
+  if (!to) {
+    return { ok: false, error: "to (recipient Solana address) required" };
+  }
+
+  const map = env.saAgentTokenMap;
+  if (!map || typeof map !== "object" || Object.keys(map).length === 0) {
+    return {
+      ok: false,
+      error:
+        "No token symbol map (unexpected in app: native SABTC/SAETH/SAUSD should always be present). If you are calling this standalone, pass saAgentTokenMap with those symbols.",
+    };
+  }
+
+  const mintStr = map[tokenSymbol];
+  if (!mintStr || !looksLikeBase58Mint(mintStr)) {
+    const keys = Object.keys(map).sort().join(", ");
+    return {
+      ok: false,
+      error: `Unknown or invalid mint for '${tokenSymbol}'. Configured symbols: ${keys || "(none)"}`,
+    };
+  }
+
+  const keypair = await getKeypair(env);
+  if (!keypair) {
+    return { ok: false, error: "Solana wallet not configured" };
+  }
+
+  let toPubkey;
+  let mintPubkey;
+  try {
+    toPubkey = new PublicKey(to);
+    mintPubkey = new PublicKey(mintStr);
+  } catch (e) {
+    return { ok: false, error: `Invalid address or mint: ${e.message || String(e)}` };
+  }
+
+  try {
+    const {
+      getAssociatedTokenAddressSync,
+      createTransferInstruction,
+      createAssociatedTokenAccountIdempotentInstruction,
+      TOKEN_PROGRAM_ID,
+      getMint,
+    } = await import("@solana/spl-token");
+    const conn = getConnection(env);
+
+    let decimals;
+    try {
+      const mintInfo = await getMint(conn, mintPubkey);
+      decimals = mintInfo.decimals;
+    } catch (e) {
+      return { ok: false, error: `Failed to read mint metadata: ${e.message || String(e)}` };
+    }
+
+    const parsed = parseTokenSendAmount(args?.amount, args?.amount_ui, decimals);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    const sendRaw = parsed.raw;
+
+    const sourceAta = getAssociatedTokenAddressSync(mintPubkey, keypair.publicKey);
+    const destAta = getAssociatedTokenAddressSync(mintPubkey, toPubkey);
+
+    let sourceBal = 0n;
+    try {
+      const sb = await conn.getTokenAccountBalance(sourceAta);
+      sourceBal = BigInt(sb.value.amount);
+    } catch (_) {
+      return {
+        ok: false,
+        error: "No token account for this mint on the app wallet (zero balance or missing ATA).",
+        token_symbol: tokenSymbol,
+        mint: mintStr,
+      };
+    }
+
+    if (sourceBal < sendRaw) {
+      return {
+        ok: false,
+        error: `Insufficient token balance: need ${sendRaw.toString()} smallest units, have ${sourceBal.toString()}`,
+        token_symbol: tokenSymbol,
+        mint: mintStr,
+        decimals,
+      };
+    }
+
+    const destInfo = await conn.getAccountInfo(destAta);
+    const needsDestAta = !destInfo;
+    const tokenAccRent = await conn.getMinimumBalanceForRentExemption(165);
+
+    const tx = new Transaction();
+    if (needsDestAta) {
+      tx.add(
+        createAssociatedTokenAccountIdempotentInstruction(
+          keypair.publicKey,
+          destAta,
+          toPubkey,
+          mintPubkey
+        )
+      );
+    }
+    tx.add(
+      createTransferInstruction(
+        sourceAta,
+        destAta,
+        keypair.publicKey,
+        sendRaw,
+        [],
+        TOKEN_PROGRAM_ID
+      )
+    );
+
+    const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("finalized");
+    tx.feePayer = keypair.publicKey;
+    tx.recentBlockhash = blockhash;
+    const message = tx.compileMessage();
+    const feeResp = await conn.getFeeForMessage(message);
+    const networkFeeLamports = feeResp.value != null ? feeResp.value : 50_000;
+
+    if (networkFeeLamports > MAX_AUTO_NETWORK_FEE_LAMPORTS) {
+      return {
+        ok: false,
+        error: `Estimated network fee ${networkFeeLamports} lamports exceeds automatic limit of ${MAX_AUTO_NETWORK_FEE_LAMPORTS} lamports (0.001 SOL).`,
+        estimated_network_fee_lamports: networkFeeLamports,
+        max_auto_fee_lamports: MAX_AUTO_NETWORK_FEE_LAMPORTS,
+      };
+    }
+
+    const solBalance = await conn.getBalance(keypair.publicKey);
+    const ataRentLamports = needsDestAta ? tokenAccRent : 0;
+    const bufferLamports = 5_000;
+    const solRequired = networkFeeLamports + ataRentLamports + bufferLamports;
+    if (solBalance < solRequired) {
+      return {
+        ok: false,
+        error: `Insufficient SOL: need at least ${solRequired} lamports (network fee + ${needsDestAta ? "new ATA rent + " : ""}buffer), have ${solBalance}`,
+        estimated_network_fee_lamports: networkFeeLamports,
+        ata_rent_lamports: ataRentLamports,
+        sol_balance_lamports: solBalance,
+      };
+    }
+
+    const sig = await conn.sendTransaction(tx, [keypair], {
+      skipPreflight: false,
+      preflightCommitment: "confirmed",
+      maxRetries: 3,
+    });
+    const conf = await conn.confirmTransaction(
+      { signature: sig, blockhash, lastValidBlockHeight },
+      "confirmed"
+    );
+    if (conf.value?.err) {
+      return {
+        ok: false,
+        error: `Transaction failed: ${JSON.stringify(conf.value.err)}`,
+        signature: sig,
+      };
+    }
+
+    const uiAmount = decimals ? Number(sendRaw) / 10 ** decimals : Number(sendRaw);
+    return {
+      ok: true,
+      signature: sig,
+      token_symbol: tokenSymbol,
+      mint: mintStr,
+      to,
+      amount: sendRaw.toString(),
+      amount_ui: uiAmount,
+      decimals,
+      estimated_network_fee_lamports: networkFeeLamports,
+      created_recipient_ata: needsDestAta,
+    };
+  } catch (e) {
+    return { ok: false, error: e.message || String(e) };
+  }
 }
 
 async function getKeypair(env = {}) {
@@ -54,13 +328,12 @@ export async function solanaBalance(args, env = {}) {
     const pubkey = keypair.publicKey;
     const lamports = await conn.getBalance(pubkey);
     const sol = lamports / LAMPORTS_PER_SOL;
-    const tokenAccounts = await conn.getParsedTokenAccountsByOwner(pubkey, { programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") });
-    const tokens = (tokenAccounts.value || []).map((a) => ({
-      mint: a.account.data.parsed?.info?.mint,
-      symbol: a.account.data.parsed?.info?.tokenAmount?.decimals != null ? "token" : undefined,
-      amount: a.account.data.parsed?.info?.tokenAmount?.uiAmount ?? a.account.data.parsed?.info?.tokenAmount?.amount,
-      decimals: a.account.data.parsed?.info?.tokenAmount?.decimals,
-    }));
+    const [legacyRes, t22Res] = await Promise.all([
+      conn.getParsedTokenAccountsByOwner(pubkey, { programId: SPL_TOKEN_PROGRAM_ID }),
+      conn.getParsedTokenAccountsByOwner(pubkey, { programId: SPL_TOKEN_2022_PROGRAM_ID }),
+    ]);
+    const combined = [...(legacyRes.value || []), ...(t22Res.value || [])];
+    const tokens = combined.map(parsedTokenAccountToEntry).filter(Boolean);
     return {
       ok: true,
       address: pubkey.toBase58(),
@@ -124,9 +397,22 @@ export function solanaNetwork(env = {}) {
 
 /** SPL token balance for a mint (for the wallet, or optional owner address). */
 export async function solanaTokenBalance(args, env = {}) {
-  const { mint, owner } = args || {};
-  if (!mint || typeof mint !== "string" || !mint.trim()) {
-    return { ok: false, error: "mint (token mint address) required" };
+  const ownerRaw = args?.owner;
+  const sym = String(args?.token_symbol ?? "")
+    .trim()
+    .toUpperCase();
+  const map = env.saAgentTokenMap && typeof env.saAgentTokenMap === "object" ? env.saAgentTokenMap : null;
+  const mintFromSymbol = sym && map && map[sym] ? String(map[sym]).trim() : "";
+  const mintFromArg = sanitizeSolanaBase58Input(args?.mint);
+  // Prefer server-resolved mint for native symbols so bad pastes cannot override.
+  const mint = mintFromSymbol || mintFromArg;
+  const owner = ownerRaw != null ? sanitizeSolanaBase58Input(ownerRaw) : "";
+  if (!mint) {
+    return {
+      ok: false,
+      error:
+        "Provide mint (full base58 SPL mint) or token_symbol (SABTC, SAETH, or SAUSD — server resolves mint; preferred for those three).",
+    };
   }
   const keypair = await getKeypair(env);
   if (!keypair) {
@@ -134,31 +420,73 @@ export async function solanaTokenBalance(args, env = {}) {
   }
   try {
     const conn = getConnection(env);
-    const mintPubkey = new PublicKey(mint.trim());
-    const ownerPubkey = owner && owner.trim()
-      ? new PublicKey(owner.trim())
-      : keypair.publicKey;
-    const tokenAccounts = await conn.getParsedTokenAccountsByOwner(ownerPubkey, {
-      mint: mintPubkey,
-    });
-    const accounts = (tokenAccounts.value || []).map((a) => {
-      const info = a.account.data?.parsed?.info;
-      const tokenAmount = info?.tokenAmount;
+    let mintPubkey;
+    let ownerPubkey;
+    try {
+      mintPubkey = new PublicKey(mint);
+      ownerPubkey = owner ? new PublicKey(owner) : keypair.publicKey;
+    } catch (e) {
       return {
-        mint: info?.mint,
-        amount: tokenAmount?.amount ?? "0",
-        uiAmount: tokenAmount?.uiAmount ?? 0,
-        decimals: tokenAmount?.decimals ?? 0,
+        ok: false,
+        error: `Invalid base58 mint or owner: ${e.message || String(e)}. For SAUSD/SABTC/SAETH pass token_symbol only (e.g. "SABTC") so the server uses the canonical mint; otherwise use the full mint — see docs/SA_AGENT_TOKENS.md.`,
+      };
+    }
+    const [legacyRes, t22Res] = await Promise.all([
+      conn.getParsedTokenAccountsByOwner(ownerPubkey, {
+        mint: mintPubkey,
+        programId: SPL_TOKEN_PROGRAM_ID,
+      }),
+      conn.getParsedTokenAccountsByOwner(ownerPubkey, {
+        mint: mintPubkey,
+        programId: SPL_TOKEN_2022_PROGRAM_ID,
+      }),
+    ]);
+    const rawRows = [...(legacyRes.value || []), ...(t22Res.value || [])];
+    const accounts = rawRows.map((a) => {
+      const entry = parsedTokenAccountToEntry(a);
+      if (!entry) {
+        return { mint, amount: "0", uiAmount: 0, decimals: 0 };
+      }
+      return {
+        mint: entry.mint,
+        amount: entry.amount,
+        uiAmount: entry.uiAmount,
+        decimals: entry.decimals,
       };
     });
-    const total = accounts.reduce((sum, a) => sum + Number(a.amount || 0), 0);
+    const totalBn = accounts.reduce((sum, a) => {
+      try {
+        return sum + BigInt(String(a.amount || "0"));
+      } catch {
+        return sum;
+      }
+    }, 0n);
     const decimals = accounts[0]?.decimals ?? 0;
+    const totalStr = totalBn.toString();
+    let uiAmount = 0;
+    try {
+      uiAmount = decimals ? Number(totalBn) / 10 ** decimals : Number(totalBn);
+    } catch {
+      uiAmount = 0;
+    }
+    const builtInMint =
+      sym && env.agentTokenBuiltInMints && env.agentTokenBuiltInMints[sym]
+        ? String(env.agentTokenBuiltInMints[sym]).trim()
+        : null;
+    const mintMatchesBuiltIn = Boolean(builtInMint && mint === builtInMint);
     return {
       ok: true,
       address: ownerPubkey.toBase58(),
-      mint: mint.trim(),
-      balance: String(total),
-      uiAmount: decimals ? total / Math.pow(10, decimals) : total,
+      mint,
+      ...(sym ? { token_symbol: sym } : {}),
+      ...(builtInMint
+        ? {
+            built_in_mint: builtInMint,
+            mint_matches_built_in: mintMatchesBuiltIn,
+          }
+        : {}),
+      balance: totalStr,
+      uiAmount,
       decimals,
       accounts: accounts.length > 1 ? accounts : undefined,
     };

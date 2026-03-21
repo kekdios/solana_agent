@@ -21,7 +21,7 @@
 
 | User intent / strategy     | Use these tools |
 | -------------------------- | ---------------- |
-| **Wallet** – address, balance, send SOL/SPL, tx history/status (wallet is **built in**; do not ask user for address). Use **solana_balance** and **solana_address** only; there are no account_balance/account_address tools. | `solana_address`, `solana_balance`, `solana_transfer`, `solana_token_balance`, `solana_transfer_spl`, `solana_tx_history`, `solana_tx_status`, `solana_network` |
+| **Wallet** – address, balance, send SOL/SPL, **native SABTC/SAETH/SAUSD** (**`solana_agent_token_send`** by symbol; balances via **`solana_token_balance`** with full canonical mints in **`docs/SA_AGENT_TOKENS.md`**), tx history/status (wallet is **built in**; do not ask user for address). Use **solana_balance** and **solana_address** only; there are no account_balance/account_address tools. | `solana_address`, `solana_balance`, `solana_transfer`, `solana_token_balance`, `solana_transfer_spl`, `solana_agent_token_send`, `solana_tx_history`, `solana_tx_status`, `solana_network` |
 | **Swaps / prices** – SOL or token price, swap quote (no execution) | `jupiter_price`, `jupiter_quote` |
 | **Perps** – Drift perp price, positions, place order | `drift_perp_price`, `drift_positions`, `drift_place_order` |
 | **Lending** – Kamino health, positions, deposit | `kamino_health`, `kamino_positions`, `kamino_deposit` |
@@ -71,6 +71,7 @@
 | **Solana**  | `solana_network`   | Current RPC URL and cluster (mainnet-beta, devnet, testnet).   | `solana_network({})` |
 | **Solana**  | `solana_token_balance` | SPL token balance for a mint (mint; optional owner).      | `solana_token_balance({ mint: "…" })` |
 | **Solana**  | `solana_transfer_spl`  | Send SPL tokens (mint, to, amount in smallest units).      | `solana_transfer_spl({ mint: "…", to: "…", amount: "1000000" })` |
+| **Solana**  | `solana_agent_token_send` | **Native:** send **SABTC / SAETH / SAUSD** by symbol (born with canonical mints). Optional Settings overrides. Rejects if estimated network fee &gt; 0.001 SOL. **Tier 4.** | `solana_agent_token_send({ token_symbol: "SAUSD", to: "…", amount_ui: 100 })` |
 | **Solana**  | `solana_tx_history`   | Recent tx signatures for the app wallet (optional limit).   | `solana_tx_history({ limit: 20 })` |
 | **Solana**  | `solana_tx_status`   | Transaction status by signature.                             | `solana_tx_status({ signature: "…" })` |
 | **Jupiter** | `jupiter_price`      | SOL or token USD price (and optional 24h change).             | `jupiter_price({})` or `jupiter_price({ ids: "SOL" })` |
@@ -254,14 +255,22 @@ All Solana wallet tools use the **app wallet** (keypair from encrypted config / 
 
 ### `solana_token_balance`
 
-- **Input**: `{ mint [, owner ] }` – token mint address (base58, e.g. USDC mint); omit `owner` to use the **app wallet** (default). Do not ask the user for their address.
-- **Output**: `{ ok: true, address, mint, balance, uiAmount, decimals, accounts? }` or `{ ok: false, error }`. `balance` is in smallest units; `uiAmount` is human-readable.
+- **Input**: `{ mint [, owner ] }` **or** `{ token_symbol [, owner ] }` – For **SABTC / SAETH / SAUSD**, pass **`token_symbol`** only (server resolves mint; avoids paste errors). For other tokens, pass **full** `mint` (base58, no `…`). Omit `owner` for the **app wallet**.
+- **Output**: `{ ok: true, address, mint, balance, uiAmount, decimals, accounts? [, token_symbol, built_in_mint, mint_matches_built_in ] }` or `{ ok: false, error }`. For native `token_symbol` calls, **`mint_matches_built_in: false`** means Settings/env overrode the compiled-in mint (see **`docs/SA_AGENT_TOKENS.md`** troubleshooting).
 
 ### `solana_transfer_spl`
 
 - **Input**: `{ mint, to, amount [, decimals ] }` – mint address, recipient base58, `amount` as integer string in **smallest units**; optional `decimals` for display.
 - **Process**: Creates recipient associated token account (ATA) if needed, then transfers. Idempotent ATA creation.
 - **Output**: `{ ok: true, signature, mint, to, amount, uiAmount? }` or `{ ok: false, error, signature? }`.
+
+### `solana_agent_token_send`
+
+- **What it is:** A **first-class, native** send path for the agent’s three branded tokens (**SABTC**, **SAETH**, **SAUSD**). Canonical mints are **built in**—the model should use this tool whenever the user asks to send one of those symbols, as if the capability were always part of the agent (Tier 4, same as other sends).
+- **Input**: `{ token_symbol, to, amount? | amount_ui? }` – `token_symbol` is one of the native symbols (case-insensitive); **`to`** is recipient base58; either **`amount`** (smallest units, integer string or integer) or **`amount_ui`** (human decimal; on-chain decimals from mint metadata).
+- **Overrides (optional):** Operators may repoint a symbol via **`SA_AGENT_TOKENS`** or **`SABTC` / `SAETH` / `SAUSD`** keys in Settings (or `process.env` in dev). Unset symbols use compiled-in defaults. See **`docs/SA_AGENT_TOKENS.md`**.
+- **Policy**: Estimates base **network fee** via RPC; if it **exceeds 0.001 SOL** (1,000,000 lamports), returns **`ok: false`** (no send). Checks SPL balance and SOL for fee + optional new-ATA rent + small buffer before broadcasting.
+- **Output**: `{ ok: true, signature, token_symbol, mint, to, amount, amount_ui, decimals, estimated_network_fee_lamports, created_recipient_ata }` or `{ ok: false, error, … }`.
 
 ### `solana_tx_history`
 

@@ -1,6 +1,6 @@
 # Solana Agent
 
-Self-contained Mac Electron app with Solana trading tools (balance, transfer, Jupiter price/quote, Drift perps, Kamino/Raydium/Bet stubs), workspace file tools, and a **sandbox** to create and run programs (exec). React + Tailwind chat UI. Chat can use **NanoGPT** (Grok 4 Fast — default), **Inception** (mercury-2), or **Venice** (venice-uncensored). Choose the provider and set the API key in **Settings**; optional env: `NANOGPT_API_KEY`, `INCEPTION_API_KEY`, `VENICE_ADMIN_KEY`, `CHAT_BACKEND=nanogpt|inception|venice`. Wallet and DeFi tools use the app’s Solana keypair only.
+Self-contained Mac Electron app with Solana trading tools (balance, transfer, **native SABTC/SAETH/SAUSD** via **`solana_agent_token_send`** + canonical mints for **`solana_token_balance`**, Jupiter price/quote, Drift perps, Kamino/Raydium/Bet stubs), workspace file tools, and a **sandbox** to create and run programs (exec). React + Tailwind chat UI. Chat can use **NanoGPT** (Grok 4 Fast — default), **Inception** (mercury-2), or **Venice** (venice-uncensored). Choose the provider and set the API key in **Settings**; optional env: `NANOGPT_API_KEY`, `INCEPTION_API_KEY`, `VENICE_ADMIN_KEY`, `CHAT_BACKEND=nanogpt|inception|venice`. Wallet and DeFi tools use the app’s Solana keypair only.
 
 This is a **desktop-only** app: it runs locally (Electron or `node server.js`). There are no server/deploy scripts in this repository.
 
@@ -74,6 +74,7 @@ If the file is missing, the agent may have described the write without actually 
 - `npm run test:in-process-server` — starts the server in-process and checks `/api/help` (uses a temp data dir, then removes it).
 - `npm run test:clawstr` — smoke test: live `POST …/bulletin/payment-intent`, GET Clawstr/bulletin read APIs on solanaagent.app, and (when SQLite native loads) local `/api/help` includes bulletin + read tools (see `scripts/test-clawstr-e2e.js`).
 - `node scripts/test-solana-tools.js` — runs Solana tool handlers (requires wallet in config or, for testing only, `SOLANA_PRIVATE_KEY` in .env; transfer test sends 0.001 SOL to a test address).
+- `npm run test:agent-token-send` — live **`solana_agent_token_send`** smoke test (uses **`TEST_PRIV_KEY`** from repo `.env` if set). See **`docs/SA_AGENT_TOKENS.md`**.
 
 **Settings (gear icon):** Choose **Chat provider** (NanoGPT default, Inception, or Venice) and set **NanoGPT API key**, **Inception API key**, and/or **Venice API key** (stored encrypted). Manage **Solana wallet** (view/copy public key, reveal private key, generate wallet, passphrase backup). **Environment** — set PORT, HOST, SOLANA_RPC_URL, etc. in the config table (PORT/HOST apply after restart). **Clear all conversation history** — removes all chats, messages, token usage, and saved sessions; confirm before running.
 

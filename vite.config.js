@@ -11,6 +11,11 @@ const pkg = JSON.parse(readFileSync(path.join(__dirname, "package.json"), "utf8"
 export default defineConfig({
   root: path.join(__dirname, "src/renderer"),
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      "@assets": path.join(__dirname, "assets"),
+    },
+  },
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version || "1.0.0.0"),
   },

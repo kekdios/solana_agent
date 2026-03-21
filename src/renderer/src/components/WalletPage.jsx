@@ -1,5 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useChatStore } from "../store/chatStore";
+import iconSABTC from "@assets/BTC.png";
+import iconSAETH from "@assets/ETH.png";
+import iconSAUSD from "@assets/USDC.png";
 
 const EXPLORER = "https://explorer.solana.com";
 const LOGOS_API_PATH = "/api/logos";
@@ -8,11 +11,36 @@ const TOKEN_META_BY_MINT = {
   // Common Solana tokens
   EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: { symbol: "USDC", name: "USDC" },
   Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: { symbol: "USDT", name: "USDT" }, // USDT (legacy mint)
+  // Native agent tokens (server built-in defaults; overridable via SA_AGENT_TOKENS / Settings)
+  "2kR1UKhrXq6Hef6EukLyzdD5ahcezRqwURKdtCJx2Ucy": { symbol: "SABTC", name: "Solana Agent BTC" },
+  AhyZRrDrN3apDzZqdRHtpxWmnqYDdL8VnJ66ip1KbiDS: { symbol: "SAETH", name: "Solana Agent ETH" },
+  CK9PodBifHymLBGeZujExFnpoLCsYxAw7t8c8LsDKLxG: { symbol: "SAUSD", name: "Solana Agent USD" },
 };
 
 const FALLBACK_LOGOS = {
   USDT: "https://s2.coinmarketcap.com/static/img/coins/64x64/825.png",
 };
+
+/** Wallet panel: native SABTC / SAETH / SAUSD → local icons (see docs/SA_AGENT_TOKENS.md). */
+const AGENT_TOKEN_ICONS = {
+  SABTC: iconSABTC,
+  SAETH: iconSAETH,
+  SAUSD: iconSAUSD,
+};
+
+const AGENT_PANEL_SYMBOL_NAMES = new Set(["SABTC", "SAETH", "SAUSD"]);
+
+/** Mints shown in “Solana Agent tokens” — hide from the generic Token accounts table. */
+function mintsExcludedFromGenericTokenTable(agentTokenRows) {
+  const ex = new Set();
+  for (const [mint, meta] of Object.entries(TOKEN_META_BY_MINT)) {
+    if (meta?.symbol && AGENT_PANEL_SYMBOL_NAMES.has(meta.symbol)) ex.add(mint);
+  }
+  for (const row of agentTokenRows || []) {
+    if (row?.configured && row.mint) ex.add(row.mint);
+  }
+  return ex;
+}
 
 /** Format SOL for balance display: always 4 decimal places, no scientific notation. */
 function formatSolBalance(n) {
@@ -61,6 +89,19 @@ function formatTokenAmount(t) {
   return String(t.amount);
 }
 
+function formatAgentTokenRow(row) {
+  if (!row?.configured) return "—";
+  if (!row.ok && row.error) return "—";
+  if (row.uiAmount != null && Number.isFinite(Number(row.uiAmount))) {
+    const n = Number(row.uiAmount);
+    if (n === 0) return "0";
+    if (n >= 1) return n.toLocaleString(undefined, { maximumFractionDigits: 6 });
+    return n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+  }
+  if (row.balance != null) return String(row.balance);
+  return "—";
+}
+
 export default function WalletPage({ onOpenSettings }) {
   const apiBase = useChatStore((s) => s.apiBase) || "";
   const setView = useChatStore((s) => s.setView);
@@ -83,6 +124,8 @@ export default function WalletPage({ onOpenSettings }) {
   const [loadingMoreActivity, setLoadingMoreActivity] = useState(false);
   const [hasMoreActivity, setHasMoreActivity] = useState(true);
   const [syncFromChainFeedback, setSyncFromChainFeedback] = useState(null);
+  const [agentTokens, setAgentTokens] = useState(null);
+  const [refreshingAgentTokens, setRefreshingAgentTokens] = useState(false);
 
   const fetchConfig = useCallback(() => {
     fetch(`${apiBase}/api/config`)
@@ -92,14 +135,27 @@ export default function WalletPage({ onOpenSettings }) {
   }, [apiBase]);
 
   const fetchBalance = useCallback(() => {
-    fetch(`${apiBase}/api/solana-wallet/balance`)
+    return fetch(`${apiBase}/api/solana-wallet/balance`)
       .then((r) => r.json())
       .then((data) => {
-        if (data.ok !== false) setBalance(data);
-        else setBalance(null);
+        if (data.ok !== false) {
+          setBalance(data);
+          if (Array.isArray(data.agentTokens)) setAgentTokens(data.agentTokens);
+        } else {
+          setBalance(null);
+          setAgentTokens([]);
+        }
       })
-      .catch(() => setBalance(null));
+      .catch(() => {
+        setBalance(null);
+        setAgentTokens([]);
+      });
   }, [apiBase]);
+
+  const refreshAgentTokensOnly = useCallback(() => {
+    setRefreshingAgentTokens(true);
+    fetchBalance().finally(() => setRefreshingAgentTokens(false));
+  }, [fetchBalance]);
 
   const fetchSignatures = useCallback((beforeSig = null) => {
     if (!beforeSig) setActivityError(null);
@@ -145,11 +201,7 @@ export default function WalletPage({ onOpenSettings }) {
     setError(null);
     setActivityError(null);
     fetchSolUsd();
-    Promise.all([
-      fetchConfig(),
-      fetchBalance(),
-      fetchSignatures(),
-    ]).finally(() => setLoading(false));
+    Promise.all([fetchConfig(), fetchBalance(), fetchSignatures()]).finally(() => setLoading(false));
   }, [fetchConfig, fetchBalance, fetchSignatures, fetchSolUsd]);
 
   const refreshActivity = useCallback(() => {
@@ -178,17 +230,21 @@ export default function WalletPage({ onOpenSettings }) {
     fetchSignatures(lastSig).finally(() => setLoadingMoreActivity(false));
   }, [signatures, loadingMoreActivity, fetchSignatures]);
 
+  const genericTokenAccounts = useMemo(() => {
+    const excluded = mintsExcludedFromGenericTokenTable(agentTokens);
+    return (balance?.tokens || []).filter((t) => t?.mint && !excluded.has(t.mint));
+  }, [balance?.tokens, agentTokens]);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
 
   useEffect(() => {
-    // Reset pagination when token list changes.
     setTokenPage(0);
-  }, [balance?.tokens?.length]);
+  }, [genericTokenAccounts.length, balance?.tokens]);
 
   useEffect(() => {
-    const tokens = balance?.tokens || [];
+    const tokens = genericTokenAccounts;
     if (!Array.isArray(tokens) || tokens.length === 0) return;
 
     const symbols = new Set(["SOL"]);
@@ -225,7 +281,7 @@ export default function WalletPage({ onOpenSettings }) {
     return () => {
       cancelled = true;
     };
-  }, [balance?.tokens]);
+  }, [genericTokenAccounts, apiBase]);
 
   const hasWallet = config?.solanaWallet?.hasKeypair && (config.solanaWallet.publicKey || balance?.address);
   const address = config?.solanaWallet?.publicKey || balance?.address;
@@ -407,16 +463,85 @@ export default function WalletPage({ onOpenSettings }) {
           </button>
         </section>
 
-        {/* Tokens (if any) */}
-        {balance?.tokens?.length > 0 && (
+        {/* Solana Agent tokens (SABTC / SAETH / SAUSD) */}
+        {hasWallet && Array.isArray(agentTokens) && agentTokens.length > 0 && (
+          <section className="rounded-2xl border border-[#1e1e24] bg-[#121214] p-5">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <h2 className="text-sm font-medium text-slate-400">Solana Agent tokens</h2>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={refreshAgentTokensOnly}
+                  disabled={refreshingAgentTokens}
+                  className="text-xs rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 px-2.5 py-1 font-medium text-slate-200 transition"
+                >
+                  {refreshingAgentTokens ? "Refreshing…" : "Refresh"}
+                </button>
+                <span className="text-xs text-slate-500 hidden sm:inline">Native symbols</span>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mb-3">
+              Native to the agent: built-in mints for SABTC, SAETH, SAUSD. Operators can override mints in Settings → Environment. Balances match the wallet address above.
+            </p>
+            <ul className="space-y-2">
+              {agentTokens.map((row) => {
+                const icon = AGENT_TOKEN_ICONS[row.symbol];
+                return (
+                  <li
+                    key={row.symbol}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-[#1e1e24] bg-[#0d0d0f] px-3 py-2.5"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      {icon ? (
+                        <img
+                          src={icon}
+                          alt={row.symbol}
+                          className="w-9 h-9 rounded-full shrink-0 object-cover ring-1 ring-white/10"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-9 h-9 rounded-full bg-white/10 shrink-0" />
+                      )}
+                      <div className="min-w-0">
+                        <div className="text-slate-200 font-medium">{row.symbol}</div>
+                        {!row.configured ? (
+                          <div className="text-xs text-slate-500">Mint not configured</div>
+                        ) : row.mint ? (
+                          <a
+                            href={`${EXPLORER}/address/${row.mint}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-slate-500 font-mono truncate block hover:text-emerald-400/90"
+                            title={row.mint}
+                          >
+                            {row.mint.slice(0, 6)}…{row.mint.slice(-4)}
+                          </a>
+                        ) : null}
+                        {row.configured && !row.ok && row.error ? (
+                          <div className="text-xs text-amber-400/90 mt-0.5">{row.error}</div>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="text-slate-100 tabular-nums font-medium">{formatAgentTokenRow(row)}</span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
+        {/* Tokens (excluding Solana Agent panel mints) */}
+        {genericTokenAccounts.length > 0 && (
           <section className="rounded-2xl border border-[#1e1e24] bg-[#121214] p-5">
             <div className="flex items-center justify-between gap-2 mb-3">
               <h2 className="text-sm font-medium text-slate-400">Token accounts</h2>
-              <span className="text-xs text-slate-500 tabular-nums">{balance.tokens.length} total</span>
+              <span className="text-xs text-slate-500 tabular-nums">{genericTokenAccounts.length} total</span>
             </div>
 
             {(() => {
-              const rows = (balance.tokens || []).map((t) => {
+              const rows = genericTokenAccounts.map((t) => {
                 const mint = t?.mint || "";
                 const meta = mint ? TOKEN_META_BY_MINT[mint] : null;
                 const symbol = meta?.symbol || "";

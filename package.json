@@ -39,7 +39,9 @@
     "build": "npm run build:renderer && electron-builder --mac --dir && (open dist/mac-arm64/Solana\\ Agent.app 2>/dev/null || true)",
     "test": "node -e \"console.log('OK')\"",
     "test:in-process-server": "node scripts/test-in-process-server.js",
-    "test:clawstr": "node scripts/test-clawstr-e2e.js"
+    "test:clawstr": "node scripts/test-clawstr-e2e.js",
+    "inspect:wallet-tokens": "node scripts/inspect-wallet-tokens.js",
+    "test:agent-token-send": "node scripts/test-agent-token-send.js"
   },
   "build": {
     "appId": "com.solana.agent.trader",

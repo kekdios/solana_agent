@@ -2,6 +2,17 @@
 
 When to use Solana tools and strategies. **You have these tools—use them when the user's request fits.** See TOOLS.md for full parameter and output specs.
 
+## Native agent tokens (SABTC / SAETH / SAUSD)
+
+When summarizing **diagnostics**, copy **`mint`**, **`built_in_mint`**, and **`mint_matches_built_in`** from the **tool JSON** only. For **SAETH**, **`built_in_mint`** must be **`AhyZRrDrN3apDzZqdRHtpxWmnqYDdL8VnJ66ip1KbiDS`** on this app—never substitute other mainnet “ETH” mints from memory.
+
+| Tool | When |
+|------|------|
+| **`solana_token_balance`** | When the user asks how much SABTC, SAETH, SAUSD, or **agent dollars** they have. Pass **`token_symbol`** only (`SABTC`, `SAETH`, or `SAUSD`)—server resolves mint; do not paste mints for these three. |
+| **`solana_agent_token_send`** | When the user clearly wants to **send** one of those symbols (**Tier 4**). `token_symbol`, `to`, `amount_ui` or `amount`. |
+
+Canonical mints are **built in** for send; for balance use **`token_symbol`** for the three native tokens. Use **`solana_transfer_spl`** only for **other** SPL mints (e.g. USDC).
+
 ## Important: wallet is built in
 
 **Do NOT ask the user for their wallet address or a file location** (e.g. wallet_address.txt). There is **no** `account_balance` tool—use **`solana_balance`** and **`solana_token_balance`** only. The app wallet is already configured (Settings / encrypted config). For balance checks, capital, top-up, SOL, USDC, or "check my wallet"—call the tools **immediately** and report; never say you need an address first.
@@ -19,15 +30,17 @@ When to use Solana tools and strategies. **You have these tools—use them when 
 | --------- | --------------- |
 | "What's my Solana address?" / "Where do I receive SOL?" | `solana_address` (no args; wallet built in) |
 | "How much SOL do I have?" / "Solana balance" / "Check my wallet" / "SOL and USDC" | `solana_balance` (no args); for USDC use `solana_token_balance` with USDC mint, omit owner. Do not ask for address. |
+| "How much SABTC / SAETH / SAUSD?" / "agent dollars?" | `solana_token_balance` with **`token_symbol`** (e.g. `SABTC`)—not pasted mint. |
 | "Check wallet balances" / "Give me SOL and USDC amounts" | `solana_balance` then `solana_token_balance` with USDC mint if needed. Wallet is built in—call tools directly. |
 | "Send SOL to …" / "Transfer 0.1 SOL to …" | `solana_transfer` (confirm amount and recipient first) |
 | "What network am I on?" / "Which RPC?" | `solana_network` |
 | Token balance for a mint (e.g. USDC) | `solana_token_balance` (mint only; omit owner = app wallet) |
-| Send SPL token (e.g. USDC) | `solana_transfer_spl` (mint, to, amount in smallest units) |
+| Send SPL token (e.g. USDC by mint) | `solana_transfer_spl` (mint, to, amount in smallest units) |
+| Send **SABTC / SAETH / SAUSD** (native symbols; built-in mints) | **`solana_agent_token_send`** (`token_symbol`, `to`, `amount` or `amount_ui`) — **core send**; **Tier 4**; rejects if estimated network fee exceeds 0.001 SOL |
 | "Recent transactions" / "Tx history" | `solana_tx_history` |
 | "Did this tx confirm?" / "Status of signature …" | `solana_tx_status` |
 
-**Do not send SOL or SPL without clear user intent.** Confirm amount and recipient before calling `solana_transfer` or `solana_transfer_spl`.
+**Do not send SOL, SPL, or native agent tokens without clear user intent.** Confirm amount and recipient before calling `solana_transfer`, `solana_transfer_spl`, or **`solana_agent_token_send`**.
 
 ---
 
@@ -90,7 +103,7 @@ Commands run with the workspace (or workdir) as cwd; output is capped and timeou
 
 ## Summary
 
-- **Wallet:** address, balance, transfer SOL/SPL, network, tx history/status — use the matching tool.
+- **Wallet:** address, balance, transfer SOL/SPL, native SABTC/SAETH/SAUSD (`solana_token_balance` + `token_symbol`, `solana_agent_token_send`), network, tx history/status — use the matching tool.
 - **Prices / swaps:** Jupiter for price and quote; no execution.
 - **Perps:** Drift for price and positions; place order is stub.
 - **Lending:** Kamino for health and positions; deposit is stub.

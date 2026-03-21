@@ -186,7 +186,7 @@ tools:
 
   - name: solana_token_balance
     description: |
-      Get SPL token balance (e.g. USDC) for the **app wallet** by default. Pass mint (token mint address, e.g. USDC mint). Omit owner to use the app wallet—do NOT ask the user for their address; the wallet is built in. Use for "my USDC balance", "token balance", etc. Returns balance and uiAmount.
+      Get SPL token balance for the **app wallet** by default. For **SABTC**, **SAETH**, or **SAUSD** / agent dollars, pass **token_symbol** only (e.g. `{"token_symbol":"SABTC"}`)—the server resolves the canonical mint (same as solana_agent_token_send); do not paste mints for those three (avoids Non-base58 / BLOCKED). For other tokens (e.g. USDC), pass **mint** (full base58). Omit owner for the app wallet. Returns balance, uiAmount, optional per-account breakdown.
     module: ./tools/solana.js
     handler: solanaTokenBalance
     enabled: true
@@ -195,6 +195,13 @@ tools:
     description: Send SPL (token) to a recipient. Pass mint (token mint address), to (recipient base58), amount (integer string in smallest units). Optionally decimals for display. Creates recipient token account if needed. Use when the user asks to send a token (e.g. USDC).
     module: ./tools/solana.js
     handler: solanaTransferSpl
+    enabled: true
+
+  - name: solana_agent_token_send
+    description: |
+      **Native capability:** send **SABTC**, **SAETH**, or **SAUSD** from the app wallet by **symbol**—canonical mints are built in; you were born with this tool (no mint lookup for these three). Pass token_symbol, to, and either **amount** (smallest units string) or **amount_ui** (human decimal). Operators may override mints in Settings (**SA_AGENT_TOKENS** or SABTC/SAETH/SAUSD keys). Fails if estimated **network fee** exceeds 0.001 SOL; checks token balance and SOL for fee + new-ATA rent before sending. **Tier 4** only (same as solana_transfer / solana_transfer_spl).
+    module: ./tools/solana.js
+    handler: solanaAgentTokenSend
     enabled: true
 
   - name: solana_tx_history

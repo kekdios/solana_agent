@@ -202,10 +202,19 @@ const PARAM_SCHEMAS = {
   solana_token_balance: {
     type: "object",
     properties: {
-      mint: { type: "string", description: "SPL token mint address (base58)" },
+      token_symbol: {
+        type: "string",
+        description:
+          "For native agent tokens only: SABTC, SAETH, or SAUSD (case-insensitive). Server resolves the mint from Settings / built-in defaults—use this instead of pasting mints to avoid Non-base58 / BLOCKED from copy-paste errors.",
+      },
+      mint: {
+        type: "string",
+        description:
+          "Full SPL mint base58 (no ellipsis). For USDC and arbitrary tokens. For SABTC/SAETH/SAUSD prefer token_symbol instead.",
+      },
       owner: { type: "string", description: "Optional wallet address; omit for the app wallet" },
     },
-    required: ["mint"],
+    anyOf: [{ required: ["mint"] }, { required: ["token_symbol"] }],
   },
   solana_transfer_spl: {
     type: "object",
@@ -216,6 +225,26 @@ const PARAM_SCHEMAS = {
       decimals: { type: "number", description: "Token decimals (optional, for display)" },
     },
     required: ["mint", "to", "amount"],
+  },
+  solana_agent_token_send: {
+    type: "object",
+    properties: {
+      token_symbol: {
+        type: "string",
+        description:
+          "Native symbol: SABTC, SAETH, or SAUSD (built-in mints; optional Settings overrides).",
+      },
+      to: { type: "string", description: "Recipient Solana address (base58)" },
+      amount: {
+        type: "string",
+        description: "Amount in smallest token units (integer string). Prefer this OR amount_ui, not both ambiguously.",
+      },
+      amount_ui: {
+        type: "number",
+        description: "Human token amount (e.g. 1.5). Decimals come from chain. Alternative to amount.",
+      },
+    },
+    required: ["token_symbol", "to"],
   },
   solana_tx_history: {
     type: "object",
@@ -419,7 +448,7 @@ function toolAllowedByTier(tier, name, args) {
       const m = String(args?.method || "GET").toUpperCase();
       if (m === "POST") return false;
     }
-    if (name === "solana_transfer" || name === "solana_transfer_spl") return false;
+    if (name === "solana_transfer" || name === "solana_transfer_spl" || name === "solana_agent_token_send") return false;
   }
 
   // Always-OK: inspect/read-only tools (no writes, no external side effects).
@@ -476,7 +505,7 @@ function toolAllowedByTier(tier, name, args) {
 
   if (t === 2) {
     // Tier 2: allow local content creation (workspace/docs/files) and limited HTTP fetch (GET only).
-    if (["exec", "solana_transfer", "solana_transfer_spl", "workspace_delete"].includes(name)) return false;
+    if (["exec", "solana_transfer", "solana_transfer_spl", "solana_agent_token_send", "workspace_delete"].includes(name)) return false;
     if (name === "fetch_url") {
       const m = String(args?.method || "GET").toUpperCase();
       if (m === "POST") return false;
@@ -486,7 +515,7 @@ function toolAllowedByTier(tier, name, args) {
 
   if (t === 3) {
     // Tier 3: operator mode (exec + HTTP allowed), but still block funds movement.
-    if (["solana_transfer", "solana_transfer_spl"].includes(name)) return false;
+    if (["solana_transfer", "solana_transfer_spl", "solana_agent_token_send"].includes(name)) return false;
     return true;
   }
 
@@ -550,9 +579,15 @@ async function runTool(name, args, env) {
       case "solana_network":
         return solana.solanaNetwork(env);
       case "solana_token_balance":
-        return await solana.solanaTokenBalance(args, env);
+        return await solana.solanaTokenBalance(args, {
+          ...env,
+          saAgentTokenMap: loadSaAgentTokenMints(),
+          agentTokenBuiltInMints: DEFAULT_SA_AGENT_TOKEN_MINTS,
+        });
       case "solana_transfer_spl":
         return await solana.solanaTransferSpl(args, env);
+      case "solana_agent_token_send":
+        return await solana.solanaAgentTokenSend(args, { ...env, saAgentTokenMap: loadSaAgentTokenMints() });
       case "solana_tx_history":
         return await solana.solanaTxHistory(args, env);
       case "solana_tx_status":
@@ -1226,6 +1261,15 @@ function normalizeToolResult(name, args, rawResult) {
         result = { ...result, ok: false, error: `TOOL_RESULT_VERIFICATION_FAILED: ${error}`, verification };
       }
     }
+    if (name === "solana_agent_token_send" && result.ok === true) {
+      const sig = result.signature;
+      if (!isValidBase58Signature(sig)) {
+        verification = { ok: false, reason: "signature_invalid_shape", field: "signature" };
+        status = "error";
+        error = "Tool reported success but returned an invalid Solana signature shape.";
+        result = { ...result, ok: false, error: `TOOL_RESULT_VERIFICATION_FAILED: ${error}`, verification };
+      }
+    }
     if (name === "jupiter_swap_execute" && result.ok === true && result.dry_run !== true) {
       const sig = result.VERIFIED_SIGNATURE || result.signature;
       if (!isValidBase58Signature(sig)) {
@@ -1338,6 +1382,114 @@ function loadConfigKey(key, envFallback) {
     } catch (_) {}
   }
   return envFallback ?? null;
+}
+
+/** Keys like SABTC, SAETH (SA + alnum) mapping to mint base58. */
+const SA_AGENT_TOKEN_KEY_RE = /^SA[A-Z0-9]{2,20}$/;
+
+/** Built-in defaults so Wallet + tools work without SA_AGENT_TOKENS; config/env overrides these. */
+const DEFAULT_SA_AGENT_TOKEN_MINTS = Object.freeze({
+  SABTC: "2kR1UKhrXq6Hef6EukLyzdD5ahcezRqwURKdtCJx2Ucy",
+  SAETH: "AhyZRrDrN3apDzZqdRHtpxWmnqYDdL8VnJ66ip1KbiDS",
+  SAUSD: "CK9PodBifHymLBGeZujExFnpoLCsYxAw7t8c8LsDKLxG",
+});
+
+function looksLikeSolanaMintAddress(s) {
+  const t = String(s).trim();
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(t);
+}
+
+/**
+ * Mint map for solana_agent_token_send: built-in SABTC/SAETH/SAUSD defaults, then SA_AGENT_TOKENS block,
+ * plus config/env keys matching SABTC, SAETH, etc. Overrides replace defaults per symbol.
+ */
+function loadSaAgentTokenMints() {
+  const out = Object.create(null);
+
+  const block = loadConfigKey("SA_AGENT_TOKENS", process.env.SA_AGENT_TOKENS);
+  if (block && String(block).trim()) {
+    for (const line of String(block).split(/[\r\n]+/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      const col = trimmed.indexOf(":");
+      let sep = -1;
+      if (eq >= 0 && (col < 0 || eq < col)) sep = eq;
+      else if (col >= 0) sep = col;
+      if (sep < 0) continue;
+      const sym = trimmed.slice(0, sep).trim().toUpperCase();
+      const mint = trimmed.slice(sep + 1).trim();
+      if (sym && looksLikeSolanaMintAddress(mint)) out[sym] = mint;
+    }
+  }
+
+  try {
+    for (const row of db.listConfigKeys()) {
+      const k = String(row.key || "");
+      if (!SA_AGENT_TOKEN_KEY_RE.test(k) || k === "SA_AGENT_TOKENS") continue;
+      const v = loadConfigKey(k);
+      if (v && looksLikeSolanaMintAddress(v)) out[k.toUpperCase()] = v.trim();
+    }
+  } catch (_) {}
+
+  for (const [k, v] of Object.entries(process.env)) {
+    if (!SA_AGENT_TOKEN_KEY_RE.test(k) || k === "SA_AGENT_TOKENS") continue;
+    if (v && looksLikeSolanaMintAddress(v)) out[k.toUpperCase()] = v.trim();
+  }
+
+  for (const [sym, mint] of Object.entries(DEFAULT_SA_AGENT_TOKEN_MINTS)) {
+    if (!out[sym]) out[sym] = mint;
+  }
+
+  return out;
+}
+
+const AGENT_WALLET_PANEL_SYMBOLS = ["SABTC", "SAETH", "SAUSD"];
+/** Decimals when the wallet has no ATA yet (must match on-chain mints for default agent tokens). */
+const AGENT_PANEL_DEFAULT_DECIMALS = Object.freeze({ SABTC: 6, SAETH: 6, SAUSD: 6 });
+
+/**
+ * Build Wallet agent-token rows from a successful solanaBalance() result — no extra RPC per mint (avoids public RPC 429).
+ */
+function buildAgentTokenPanelRowsFromBalance(bal) {
+  if (!bal || bal.ok !== true) return [];
+  const mintMap = loadSaAgentTokenMints();
+  const byMint = new Map();
+  for (const t of bal.tokens || []) {
+    if (t?.mint) byMint.set(t.mint, t);
+  }
+  const tokens = [];
+  for (const symbol of AGENT_WALLET_PANEL_SYMBOLS) {
+    const mint = mintMap[symbol];
+    if (!mint) {
+      tokens.push({ symbol, configured: false, mint: null, ok: true });
+      continue;
+    }
+    const row = byMint.get(mint);
+    const fallbackDec = AGENT_PANEL_DEFAULT_DECIMALS[symbol] ?? 0;
+    if (!row) {
+      tokens.push({
+        symbol,
+        configured: true,
+        mint,
+        ok: true,
+        balance: "0",
+        uiAmount: 0,
+        decimals: fallbackDec,
+      });
+      continue;
+    }
+    tokens.push({
+      symbol,
+      configured: true,
+      mint,
+      ok: true,
+      balance: String(row.amount ?? "0"),
+      uiAmount: row.uiAmount,
+      decimals: row.decimals ?? fallbackDec,
+    });
+  }
+  return tokens;
 }
 
 function clampSecurityTier(v) {
@@ -1757,7 +1909,7 @@ async function toolClawstrFeed(args) {
   return {
     ok: true,
     agent_report: report,
-    summary: { total_returned: posts.length, limit, ai_only, preview_count: previews.length },
+    summary: { total_returned: posts.length, limit, ai_only: aiOnly, preview_count: previews.length },
     posts_preview: previews,
     endpoint: res.path,
   };
@@ -2448,11 +2600,38 @@ const server = createServer(async (req, res) => {
   if (path === "/api/solana-wallet/balance" && req.method === "GET") {
     try {
       const out = await solana.solanaBalance({}, {});
+      if (out && out.ok === true) {
+        out.agentTokens = buildAgentTokenPanelRowsFromBalance(out);
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(out));
     } catch (e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e.message || String(e) }));
+    }
+    return;
+  }
+  /** Same data as balance.agentTokens — one solanaBalance RPC batch (no per-mint calls; avoids 429 on public RPC). */
+  if (path === "/api/solana-wallet/agent-tokens" && req.method === "GET") {
+    try {
+      const bal = await solana.solanaBalance({}, {});
+      const tokens = buildAgentTokenPanelRowsFromBalance(bal);
+      if (!bal || bal.ok !== true) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: bal?.error || "Balance fetch failed",
+            tokens: tokens.length ? tokens : [],
+          })
+        );
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, tokens }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message || String(e), tokens: [] }));
     }
     return;
   }

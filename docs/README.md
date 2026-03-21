@@ -8,5 +8,6 @@
 | **agent-prediction-arena-plan.md** | Plan for an agent-vs-agent prediction arena (paired matches, no AMM; out of scope for the desktop app). |
 | **QUICK_START.md** | Owner/operator quick start: keys, wallet, tiers, swaps, autopilot, and backups. |
 | **JUPITER_SWAPPING_PLAN.md** | Sovereign Jupiter swapping (implemented): intent binding, simulation enforcement, program allowlist, Tier 4 gating, and optional autopilot. |
+| **SA_AGENT_TOKENS.md** | Native agent SPL send (**`solana_agent_token_send`**), canonical mints for **`solana_token_balance`**, optional overrides, Wallet panel. |
 
 The main project README is in the repository root. A dedicated website for Solana Agent is at **https://solanaagent.app**.
