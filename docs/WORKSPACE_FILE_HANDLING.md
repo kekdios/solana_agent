@@ -10,6 +10,8 @@ This document describes the workspace file-handling implementation in `tools/wor
 - **Role:** CRUD and discovery for files under a single **workspace** directory. Used by the chat agent via HTTP API tool calls (`workspace_read`, `workspace_write`, `workspace_delete`, `workspace_list`, `workspace_tree`). The **exec** tool (`tools/exec.js`) runs shell commands with this same workspace as the current working directory (sandbox).
 - **Invoker:** `server.js` calls these functions with arguments from the LLM; results are JSON-serialized and sent back in the chat flow. The agent (and thus the user) can only access paths under the workspace root.
 
+**Conventional files:** Besides persona/rules (`SOUL.md`, `AGENTS.md`, `tools.md`, skills), the repo ships **`HEARTBEAT.md`** — an optional checklist the model follows when a **chat heartbeat** fires (see root **README.md** and **`HEARTBEAT_INTERVAL_MS`** in Settings). Path is always under **`WORKSPACE_DIR`** (repo `workspace/` when running `node server.js`; app userData `workspace/` when running Electron).
+
 ---
 
 ## 2. Workspace root

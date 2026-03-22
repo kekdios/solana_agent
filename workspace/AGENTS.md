@@ -274,6 +274,10 @@ Default heartbeat prompt:
 
 You are free to edit `HEARTBEAT.md` with a short checklist or reminders. Keep it small to limit token burn.
 
+**Shipped template:** The repository includes **`workspace/HEARTBEAT.md`** (default peg/treasury-oriented checklist: SABTC/SAETH vs Hyperliquid, balances, logging). On **Electron**, the live workspace is under app user data (macOS: `~/Library/Application Support/solagent/workspace/`). If that copy omits the file, copy from the repo or create it with **`workspace_write`**.
+
+**Verification (anti-fabrication):** After claiming you created or updated `HEARTBEAT.md`, you must **`workspace_read`** it (or the user must confirm on disk). If **`workspace_read`** returns file not found, say so—do not claim the file exists. Tool payloads returning `ok: true` without a readable file on disk are not proof of persistence.
+
 ### Heartbeat vs Cron: When to Use Each
 
 **Use heartbeat when:**

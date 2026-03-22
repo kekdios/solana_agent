@@ -191,14 +191,16 @@ Run a shell command with the **workspace** (or a subdirectory) as the current di
 
 - **Input**: none.
 - **Output**: `{ ok: true, payload: { timestamp, status, memory_heap_used, pid } }`.
-- **Optional**: Set `HEARTBEAT_INTERVAL_MS` in Settings → Environment (or `.env` for local `node` runs). The server logs heap stats on that interval; the Electron **Chat** view also injects the default heartbeat user message on the same interval so the model follows `HEARTBEAT.md` (while Chat is visible; minimum 10s between ticks).
+- **Optional**: Set `HEARTBEAT_INTERVAL_MS` in Settings → Environment (or `.env` for local `node` runs). The server logs heap stats on that interval; the Electron **Chat** view also injects the default heartbeat user message on the same interval so the model follows **`HEARTBEAT.md`** (while Chat is visible; minimum 10s between ticks).
+- **`HEARTBEAT.md`**: Workspace-relative checklist (e.g. peg/treasury checks). **Repo template:** `workspace/HEARTBEAT.md`. **Electron (macOS):** `~/Library/Application Support/solagent/workspace/HEARTBEAT.md`. **`node server.js` from repo:** `agent/workspace/HEARTBEAT.md`. Edit freely; keep it short. If the file is missing, the model should not fabricate a write—use **`workspace_write`** and verify with **`workspace_read`** or the path on disk.
 
 ### 8. `cronjob`
 
 - **Input**: `{ expression, task }`.
-  - `expression` – Cron expression (5 fields: min hour day month weekday), e.g. `*/5 * * * *` = every 5 minutes.
+  - `expression` – Cron expression (5 fields: min hour day month weekday), e.g. `*/5 * * * *` = every 5 minutes. Hourly example: `0 * * * *` (at minute 0 of each hour).
   - `task` – One of: `log`, `heartbeat`, `check_btc` (predefined tasks only; no arbitrary shell/JS).
 - **Output**: `{ ok, message, schedule }` – e.g. `schedule: "*/5 * * * *:heartbeat"` or error if invalid expression/unknown task.
+- **Important**: Cron task **`heartbeat`** runs the same **server health** payload as the **`heartbeat`** tool (timestamp, memory, pid). It does **not** invoke the chat model and does **not** read **`HEARTBEAT.md`**. For periodic **agent** peg/checklist work, use **`HEARTBEAT_INTERVAL_MS`** (Chat view) or ask the user to trigger a heartbeat message.
 - **Note**: List/stop of scheduled jobs is available in code (`cronjob.listCronJobs`, `cronjob.stopCronJob`) but not exposed as LLM tools in this version.
 
 ---
