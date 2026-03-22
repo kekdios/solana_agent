@@ -308,8 +308,8 @@ export default function ChatArea() {
    * Server-side startHeartbeat still only logs memory to the console.
    */
   useEffect(() => {
-    const base = apiBase;
-    if (!base) return undefined;
+    // Match sendMessage: apiBase is often "" (App resets it); relative `/api/config` works on same origin.
+    const base = apiBase || "";
 
     let cancelled = false;
     let intervalId = null;
