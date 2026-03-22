@@ -37,3 +37,7 @@ This script (`scripts/verify-treasury-trade-path.js`) uses **only** the Orca Whi
 - **Policy:** Live swaps require **`SWAPS_ENABLED`** + **`SWAPS_EXECUTION_ENABLED`**; **`dry_run:true`** skips those (still **Tier 4**).
 - **LP** remains out of scope until specified.
 - **Wallet “Agent” badge:** successful live **`treasury_pool_swap`** txs are written to **`swap_intents`** (status `succeeded` + signature), same table as **`jupiter_swap_execute`**, so the Wallet panel can flag them as agent-executed.
+
+## Periodic peg checks (`HEARTBEAT.md`)
+
+For **automated agent turns** that re-check pool vs reference prices (Hyperliquid mids), use the **chat heartbeat**: set **`HEARTBEAT_INTERVAL_MS`** in Settings → Environment and keep the **Chat** view open. The model reads **`workspace/HEARTBEAT.md`** when the default heartbeat user message fires. The repository ships a default checklist in **`workspace/HEARTBEAT.md`** (SABTC/SAETH vs HL, balances, dry-run swap, logging); copy or edit it in your live workspace (**Electron macOS:** `~/Library/Application Support/solagent/workspace/HEARTBEAT.md`). The **`cronjob`** task **`heartbeat`** is **only** a server health log—it does **not** run this checklist.

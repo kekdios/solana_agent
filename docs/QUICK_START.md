@@ -75,6 +75,20 @@ In chat: **`docs/SA_AGENT_TOKENS.md`** lists canonical mints for balance checks;
 
 ---
 
+## 5a) Optional: Periodic chat heartbeat (`HEARTBEAT.md`)
+
+If you want the agent to run a **repeatable checklist** (e.g. peg / treasury checks) while you keep the **Chat** screen open:
+
+| What | Where |
+|------|--------|
+| **Interval** | **Settings → Environment → `HEARTBEAT_INTERVAL_MS`** (milliseconds). Example: `1800000` = 30 minutes. Empty = off. Minimum effective tick in the UI is 10 seconds. |
+| **Checklist file** | **`HEARTBEAT.md`** in the **workspace** folder the app uses. **Electron (macOS):** `~/Library/Application Support/solagent/workspace/HEARTBEAT.md`. **Running from repo:** `agent/workspace/HEARTBEAT.md`. The repo includes a default template (SABTC/SAETH peg-oriented); edit it to match your practice. |
+| **Not the same as cron** | The **`cronjob`** task named `heartbeat` only logs **server health** (memory, pid)—it does **not** run the model or read `HEARTBEAT.md`. |
+
+After changing `HEARTBEAT_INTERVAL_MS`, switch away from Chat and back (e.g. Wallet → Chat) so the UI picks up the new interval, or restart the app.
+
+---
+
 ## 6) Making swaps work (checklist)
 
 Follow these in order so swaps actually run:

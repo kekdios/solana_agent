@@ -51,7 +51,7 @@ Full playbook: **`skills/clawstr/SKILLS.md`** (loaded with this bootstrap).
 | **Workspace** | workspace_read, workspace_write, workspace_delete, workspace_list, workspace_tree |
 | **Sandbox** | exec |
 | **Memory** | conversation_search |
-| **Core / web** | browse, fetch_url, file_write, file_read, file_list, heartbeat, cronjob, get_btc_price, generate_image, analyze_image |
+| **Core / web** | browse, fetch_url, file_write, file_read, file_list, heartbeat (tool = server health JSON; chat heartbeat + **`HEARTBEAT.md`** = separate—see **AGENTS.md**), cronjob (`task: heartbeat` = server health only, not LLM), get_btc_price, generate_image, analyze_image |
 
 **Solana skills (deeper playbooks):** `skills/solana/SKILLS.md`, `skills/solana_swaps/SKILLS.md`.
 
