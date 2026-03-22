@@ -10,8 +10,10 @@ When summarizing **diagnostics**, copy **`mint`**, **`built_in_mint`**, and **`m
 |------|------|
 | **`solana_token_balance`** | When the user asks how much SABTC, SAETH, SAUSD, or **agent dollars** they have. Pass **`token_symbol`** only (`SABTC`, `SAETH`, or `SAUSD`)—server resolves mint; do not paste mints for these three. |
 | **`solana_agent_token_send`** | When the user clearly wants to **send** one of those symbols (**Tier 4**). `token_symbol`, `to`, `amount_ui` or `amount`. |
+| **`treasury_pool_info`** | **Read-only** pool snapshot (vault balances, spot price as token B per 1 token A, tick, liquidity, fees)—same logic as **solanaagent.app** `/api/orca/pool/…` (Orca API, else RPC decode). `pair`: `SABTC_SAUSD` (default) or `SAETH_SAUSD`, or `pool_address`. Optional `orca_proxy_base_url` to hit the site proxy first. For **market-making / monitoring**; not an executable quote—use **`treasury_pool_swap`** + **`dry_run:true`** to simulate a size. |
+| **`treasury_pool_swap`** | When the user wants to **trade** SABTC/SAETH against SAUSD in the **native Whirlpool** (not Jupiter). `input_token_symbol`, `output_token_symbol`, `amount` or `amount_ui`. Use **`dry_run:true`** first if unsure. **Tier 4**; Swaps settings must allow execution for a real tx. |
 
-Canonical mints are **built in** for send; for balance use **`token_symbol`** for the three native tokens. Use **`solana_transfer_spl`** only for **other** SPL mints (e.g. USDC).
+Canonical mints are **built in** for send/swap; for balance use **`token_symbol`** for the three native tokens. Use **`solana_transfer_spl`** only for **other** SPL mints (e.g. USDC).
 
 ## Important: wallet is built in
 
@@ -36,11 +38,13 @@ Canonical mints are **built in** for send; for balance use **`token_symbol`** fo
 | "What network am I on?" / "Which RPC?" | `solana_network` |
 | Token balance for a mint (e.g. USDC) | `solana_token_balance` (mint only; omit owner = app wallet) |
 | Send SPL token (e.g. USDC by mint) | `solana_transfer_spl` (mint, to, amount in smallest units) |
-| Send **SABTC / SAETH / SAUSD** (native symbols; built-in mints) | **`solana_agent_token_send`** (`token_symbol`, `to`, `amount` or `amount_ui`) — **core send**; **Tier 4**; rejects if estimated network fee exceeds 0.001 SOL |
+| Send **SABTC / SAETH / SAUSD** (native symbols; built-in mints) | **`solana_agent_token_send`** (`token_symbol`, `to`, `amount` or `amount_ui`) — **Tier 4**; fee cap 0.001 SOL |
+| **Pool state** (treasury Whirlpool: reserves, spot price, tick, fees) | **`treasury_pool_info`** — read-only; then **`treasury_pool_swap`** + `dry_run` to validate a trade size |
+| **Swap** SABTC↔SAUSD or SAETH↔SAUSD (treasury pool) | **`treasury_pool_swap`** — Orca Whirlpool only; **Tier 4**; `dry_run` optional |
 | "Recent transactions" / "Tx history" | `solana_tx_history` |
 | "Did this tx confirm?" / "Status of signature …" | `solana_tx_status` |
 
-**Do not send SOL, SPL, or native agent tokens without clear user intent.** Confirm amount and recipient before calling `solana_transfer`, `solana_transfer_spl`, or **`solana_agent_token_send`**.
+**Do not send or treasury-swap without clear user intent.** Confirm amounts (and swap direction) before `solana_transfer`, `solana_transfer_spl`, **`solana_agent_token_send`**, or **`treasury_pool_swap`**.
 
 ---
 
@@ -49,6 +53,7 @@ Canonical mints are **built in** for send; for balance use **`token_symbol`** fo
 | User asks | Tool(s) to use |
 | --------- | --------------- |
 | "SOL price" / "How much is SOL in USD?" | `jupiter_price` (default is SOL) |
+| "Hyperliquid BTC/ETH price" / "HL perp mid" / compare pool to external | **`hyperliquid_price`** (default BTC+ETH; optional `coins`: e.g. `["SOL"]`) |
 | "Price of [token]" | `jupiter_price` with ids (mint or "SOL", etc.) |
 | "What would I get if I swapped 1 SOL for USDC?" / "Quote a swap" | `jupiter_quote` (input_mint, output_mint, amount) |
 | **"Swap X to USDC" / "Sell my SOL" / "Execute a swap"** | **Prepare→confirm→execute flow:** `jupiter_swap_prepare` → user confirms → `jupiter_swap_execute`. See **`workspace/skills/solana_swaps/SKILLS.md`** for the full playbook. |
@@ -103,7 +108,7 @@ Commands run with the workspace (or workdir) as cwd; output is capped and timeou
 
 ## Summary
 
-- **Wallet:** address, balance, transfer SOL/SPL, native SABTC/SAETH/SAUSD (`solana_token_balance` + `token_symbol`, `solana_agent_token_send`), network, tx history/status — use the matching tool.
+- **Wallet:** address, balance, transfer SOL/SPL, native SABTC/SAETH/SAUSD (`solana_token_balance`, `solana_agent_token_send`, **`treasury_pool_info`**, **`treasury_pool_swap`**), network, tx history/status — use the matching tool.
 - **Prices / swaps:** Jupiter for price and quote; no execution.
 - **Perps:** Drift for price and positions; place order is stub.
 - **Lending:** Kamino for health and positions; deposit is stub.

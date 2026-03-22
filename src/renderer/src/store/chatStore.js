@@ -1,5 +1,9 @@
 import { create } from "zustand";
 
+/** Injected as a user message when the app chat heartbeat fires (see workspace/AGENTS.md). */
+export const DEFAULT_HEARTBEAT_USER_PROMPT =
+  "[Heartbeat] Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.";
+
 export const SLASH_HELP = `Slash commands:
 • /save – Save the current session with an automatic timestamp.
 • /history – Show saved conversations and let you load a previous one.

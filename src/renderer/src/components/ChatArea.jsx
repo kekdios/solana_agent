@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { useChatStore } from "../store/chatStore";
+import { useChatStore, DEFAULT_HEARTBEAT_USER_PROMPT } from "../store/chatStore";
 
 const isUser = (role) => role === "user";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
@@ -301,6 +301,49 @@ export default function ChatArea() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  /**
+   * When Settings → HEARTBEAT_INTERVAL_MS is set, periodically POST the default heartbeat
+   * user prompt so the agent runs HEARTBEAT.md checks in this conversation (while Chat is open).
+   * Server-side startHeartbeat still only logs memory to the console.
+   */
+  useEffect(() => {
+    const base = apiBase;
+    if (!base) return undefined;
+
+    let cancelled = false;
+    let intervalId = null;
+
+    (async () => {
+      try {
+        const res = await fetch(`${base}/api/config`);
+        const data = await res.json();
+        if (cancelled) return;
+        const raw = data?.config?.env?.HEARTBEAT_INTERVAL_MS;
+        const ms = Number(raw);
+        if (!Number.isFinite(ms) || ms <= 0) return;
+
+        const safeMs = Math.max(ms, 10_000);
+
+        const tick = () => {
+          if (cancelled) return;
+          if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+          const st = useChatStore.getState();
+          if (st.loading) return;
+          void st.sendMessage(DEFAULT_HEARTBEAT_USER_PROMPT);
+        };
+
+        intervalId = setInterval(tick, safeMs);
+      } catch {
+        // ignore — heartbeat is optional
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (intervalId != null) clearInterval(intervalId);
+    };
+  }, [apiBase]);
 
   const handleSubmit = (e) => {
     e.preventDefault();

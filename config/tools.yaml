@@ -204,6 +204,18 @@ tools:
     handler: solanaAgentTokenSend
     enabled: true
 
+  - name: treasury_pool_swap
+    description: |
+      **Born-with treasury trading:** swap **SABTC↔SAUSD** or **SAETH↔SAUSD** on Orca Whirlpools (Orca SDK only—no Jupiter). Same app wallet as **solana_token_balance** / **solana_agent_token_send**. Pass **input_token_symbol**, **output_token_symbol**, **amount** or **amount_ui**. Requires **SWAPS_ENABLED**; live execution needs **SWAPS_EXECUTION_ENABLED**. Use **dry_run:true** to simulate without sending. **Tier 4.** No liquidity provision.
+    module: ./tools/treasury-pool-swap.js
+    handler: treasuryPoolSwap
+    enabled: true
+
+  - name: treasury_pool_info
+    description: |
+      **Read-only** Whirlpool snapshot for treasury pools (**pair:** `SABTC_SAUSD` default or `SAETH_SAUSD`) or **pool_address**. Matches solanaagent.app logic: Orca REST **GET /v2/solana/pools/{address}**, else **on-chain** decode (vault balances, spot price as token B per 1 token A, tick, liquidity, fees). Optional **orca_proxy_base_url** e.g. `https://www.solanaagent.app/api` to hit the same **/orca/pool/…** proxy first. Use for market-making context; **not** an executable quote—use **treasury_pool_swap** with **dry_run:true** to simulate a trade size. **Read-only; allowed at Tier 2+** (not a swap send).
+    enabled: true
+
   - name: solana_tx_history
     description: Get recent transaction signatures for the app wallet. Pass optional limit (default 20, max 50). Returns list of signature, blockTime, err, slot.
     module: ./tools/solana.js
@@ -225,6 +237,11 @@ tools:
   - name: get_sol_price_usd
     description: |
       Get SOL price in USD from CoinGecko—the SAME source as the Wallet screen. Use this (not jupiter_price) when converting "$X" to lamports for a swap (e.g. "$5 swap"). So the USD amount the user sees on the Wallet matches the swap: amount_lamports = round(X / price * 1e9). Returns price, source "coingecko".
+    enabled: true
+
+  - name: hyperliquid_price
+    description: |
+      **Hyperliquid perp mid prices (USD).** POST `https://api.hyperliquid.xyz/info` with `{ "type": "allMids" }`. Default coins **BTC** and **ETH**; optional **`coins`** array e.g. `["BTC","ETH","SOL"]`. Returns **`mids_usd`** and **`agent_report`**. Use to compare treasury pool implied prices vs CEX-style perp mids—not executable on Solana. Read-only; any tier.
     enabled: true
 
   - name: jupiter_quote

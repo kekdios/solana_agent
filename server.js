@@ -2,7 +2,7 @@ import { createServer } from "http";
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { join, extname, dirname } from "path";
 import { fileURLToPath } from "url";
-import { randomBytes, createCipheriv, createDecipheriv, randomUUID } from "crypto";
+import { randomBytes, createCipheriv, createDecipheriv, randomUUID, createHash } from "crypto";
 import { Keypair, Connection, PublicKey, Transaction, SystemProgram } from "@solana/web3.js";
 import bs58 from "bs58";
 import yaml from "js-yaml";
@@ -22,6 +22,9 @@ import * as docIndexModule from "./tools/doc-index.js";
 import * as docSearchModule from "./tools/doc-search.js";
 import * as readDocsFolderModule from "./tools/read-docs-folder.js";
 import * as solana from "./tools/solana.js";
+import * as treasuryPool from "./tools/treasury-pool-swap.js";
+import { treasuryPoolInfo } from "./tools/treasury-pool-info.js";
+import { hyperliquidPerpMids } from "./tools/hyperliquid-price.js";
 import * as jupiter from "./tools/jupiter.js";
 import * as drift from "./tools/drift.js";
 import * as kamino from "./tools/kamino.js";
@@ -246,6 +249,51 @@ const PARAM_SCHEMAS = {
     },
     required: ["token_symbol", "to"],
   },
+  treasury_pool_info: {
+    type: "object",
+    properties: {
+      pair: {
+        type: "string",
+        description:
+          "Treasury pool: SABTC_SAUSD (default) or SAETH_SAUSD. Ignored if pool_address is set.",
+      },
+      pool_address: {
+        type: "string",
+        description: "Optional Whirlpool address (base58). Overrides pair when set.",
+      },
+      orca_proxy_base_url: {
+        type: "string",
+        description:
+          "Optional same-origin-style base e.g. https://www.solanaagent.app/api — tries GET /orca/pool/{address} first (matches website).",
+      },
+    },
+    required: [],
+  },
+  treasury_pool_swap: {
+    type: "object",
+    properties: {
+      input_token_symbol: {
+        type: "string",
+        description:
+          "Token to sell from the app wallet: SABTC, SAETH, or SAUSD (must form a pool pair with SAUSD). Born-with treasury Whirlpool swap (Orca SDK only).",
+      },
+      output_token_symbol: {
+        type: "string",
+        description: "Token to buy: the other leg of SABTC↔SAUSD or SAETH↔SAUSD.",
+      },
+      amount: {
+        type: "string",
+        description: "Input amount in smallest units (integer string). Use this OR amount_ui.",
+      },
+      amount_ui: { type: "number", description: "Human decimal input amount; decimals from mint." },
+      slippage_bps: { type: "number", description: "Slippage in basis points (default 100 = 1%)." },
+      dry_run: {
+        type: "boolean",
+        description: "If true, simulate only (no send). Tier 4 still required unless policy changes.",
+      },
+    },
+    required: ["input_token_symbol", "output_token_symbol"],
+  },
   solana_tx_history: {
     type: "object",
     properties: { limit: { type: "number", description: "Max signatures to return (default 20, max 50)" } },
@@ -264,6 +312,18 @@ const PARAM_SCHEMAS = {
   get_sol_price_usd: {
     type: "object",
     properties: {},
+    required: [],
+  },
+  hyperliquid_price: {
+    type: "object",
+    properties: {
+      coins: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Optional Hyperliquid perp coin symbols (default [\"BTC\",\"ETH\"]). Examples: SOL, HYPE.",
+      },
+    },
     required: [],
   },
   jupiter_quote: {
@@ -448,7 +508,8 @@ function toolAllowedByTier(tier, name, args) {
       const m = String(args?.method || "GET").toUpperCase();
       if (m === "POST") return false;
     }
-    if (name === "solana_transfer" || name === "solana_transfer_spl" || name === "solana_agent_token_send") return false;
+    if (name === "solana_transfer" || name === "solana_transfer_spl" || name === "solana_agent_token_send" || name === "treasury_pool_swap")
+      return false;
   }
 
   // Always-OK: inspect/read-only tools (no writes, no external side effects).
@@ -481,6 +542,8 @@ function toolAllowedByTier(tier, name, args) {
     "jupiter_price",
     "get_sol_price_usd",
     "jupiter_quote",
+    "hyperliquid_price",
+    "treasury_pool_info",
     "drift_perp_price",
     "drift_positions",
     "kamino_health",
@@ -496,7 +559,14 @@ function toolAllowedByTier(tier, name, args) {
   // non-swap tools (Tier 2+ can run HTTP-side-effect tools; Tier 1 remains read-only).
 
   // Swap execution flow is Tier 4 only (sovereign funds movement capability).
-  if (name === "jupiter_swap_prepare" || name === "jupiter_swap_execute" || name === "jupiter_swap_cancel" || name === "jupiter_swap_confirm") return false;
+  if (
+    name === "jupiter_swap_prepare" ||
+    name === "jupiter_swap_execute" ||
+    name === "jupiter_swap_cancel" ||
+    name === "jupiter_swap_confirm" ||
+    name === "treasury_pool_swap"
+  )
+    return false;
 
   if (t === 1) {
     // Tier 1: safest defaults (no shell, no transfers, no mutation, no network POSTs, no background automation).
@@ -505,7 +575,8 @@ function toolAllowedByTier(tier, name, args) {
 
   if (t === 2) {
     // Tier 2: allow local content creation (workspace/docs/files) and limited HTTP fetch (GET only).
-    if (["exec", "solana_transfer", "solana_transfer_spl", "solana_agent_token_send", "workspace_delete"].includes(name)) return false;
+    if (["exec", "solana_transfer", "solana_transfer_spl", "solana_agent_token_send", "treasury_pool_swap", "workspace_delete"].includes(name))
+      return false;
     if (name === "fetch_url") {
       const m = String(args?.method || "GET").toUpperCase();
       if (m === "POST") return false;
@@ -515,7 +586,7 @@ function toolAllowedByTier(tier, name, args) {
 
   if (t === 3) {
     // Tier 3: operator mode (exec + HTTP allowed), but still block funds movement.
-    if (["solana_transfer", "solana_transfer_spl", "solana_agent_token_send"].includes(name)) return false;
+    if (["solana_transfer", "solana_transfer_spl", "solana_agent_token_send", "treasury_pool_swap"].includes(name)) return false;
     return true;
   }
 
@@ -588,6 +659,53 @@ async function runTool(name, args, env) {
         return await solana.solanaTransferSpl(args, env);
       case "solana_agent_token_send":
         return await solana.solanaAgentTokenSend(args, { ...env, saAgentTokenMap: loadSaAgentTokenMints() });
+      case "treasury_pool_info":
+        return await treasuryPoolInfo(args, env);
+      case "treasury_pool_swap": {
+        const dry =
+          args?.dry_run === true ||
+          args?.dry_run === "true" ||
+          String(args?.dry_run || "").toLowerCase() === "true";
+        const pol = loadSwapPolicy();
+        if (!dry) {
+          if (!pol.enabled) {
+            return {
+              ok: false,
+              error:
+                "Swaps are disabled (SWAPS_ENABLED). Enable Settings → Swaps. Treasury Whirlpool swaps use the same toggle.",
+              code: "SWAPS_DISABLED",
+            };
+          }
+          if (!pol.executionEnabled) {
+            return {
+              ok: false,
+              error:
+                "Live treasury swap needs execution enabled (SWAPS_EXECUTION_ENABLED). Use dry_run:true to simulate only.",
+              code: "EXECUTION_DISABLED",
+            };
+          }
+        }
+        if (swapLock.active) {
+          return { ok: false, error: "Another swap is in progress; wait and retry." };
+        }
+        try {
+          if (!dry) swapLock = { active: true, intent_id: null, started_at: Date.now() };
+          const out = await treasuryPool.treasuryPoolSwap(args, {
+            ...env,
+            saAgentTokenMap: loadSaAgentTokenMints(),
+          });
+          if (out?.ok && !dry && out.signature) {
+            try {
+              recordTreasuryPoolSwapIntent(out);
+            } catch (recErr) {
+              console.error("recordTreasuryPoolSwapIntent:", recErr?.message || recErr);
+            }
+          }
+          return out;
+        } finally {
+          if (!dry) swapLock = { active: false, intent_id: null, started_at: 0 };
+        }
+      }
       case "solana_tx_history":
         return await solana.solanaTxHistory(args, env);
       case "solana_tx_status":
@@ -596,6 +714,8 @@ async function runTool(name, args, env) {
         return await jupiter.jupiterPrice(args, env);
       case "get_sol_price_usd":
         return await getSolPriceUsdCoinGecko();
+      case "hyperliquid_price":
+        return await hyperliquidPerpMids(args, env);
       case "jupiter_quote":
         return await jupiter.jupiterQuote(args, env);
       case "jupiter_swap_prepare":
@@ -669,6 +789,72 @@ async function runTool(name, args, env) {
       e == null ? String(e) : typeof e === "string" ? e : (e?.message != null ? String(e.message) : String(e));
     return { ok: false, error: msg };
   }
+}
+
+/** Persist a completed Orca treasury swap so Wallet UI can flag txs with the Agent badge (same table as Jupiter). */
+function recordTreasuryPoolSwapIntent(swapResult) {
+  if (!swapResult?.ok || swapResult.dry_run === true) return;
+  const sig = String(swapResult.signature || "").trim();
+  if (!sig || !isValidBase58Signature(sig)) return;
+  const wallet = getSolanaPublicKeyFromConfig();
+  if (!wallet) return;
+
+  const dup = db
+    .prepare(`SELECT 1 AS x FROM swap_intents WHERE signature = ? LIMIT 1`)
+    .get(sig);
+  if (dup) return;
+
+  const inMint = String(swapResult.input_mint || "").trim();
+  const outMint = String(swapResult.output_mint || "").trim();
+  const amountIn = String(swapResult.amount_in || "").trim();
+  if (!inMint || !outMint || !amountIn) return;
+
+  const intent_id = randomUUID();
+  const quoteObj = {
+    kind: "treasury_whirlpool",
+    pool: swapResult.pool,
+    input_token_symbol: swapResult.input_token_symbol,
+    output_token_symbol: swapResult.output_token_symbol,
+    input_mint: inMint,
+    output_mint: outMint,
+  };
+  const quote_json = JSON.stringify(quoteObj);
+  const quote_hash = createHash("sha256").update(quote_json).digest("hex");
+  const policySnapshot = {
+    created_by: "treasury_pool_swap",
+    recorded_at: new Date().toISOString(),
+  };
+  const expiresAt = new Date(Date.now() + 10 * 365 * 864e5 * 1000).toISOString();
+  const slippageBps = Math.max(1, Math.min(Number(swapResult.slippage_bps) || 100, 5000));
+
+  db.insertSwapIntent({
+    intent_id,
+    wallet_pubkey: wallet,
+    input_mint: inMint,
+    output_mint: outMint,
+    amount_in: amountIn,
+    slippage_bps: slippageBps,
+    expected_out_amount: String(swapResult.estimated_amount_out ?? ""),
+    min_out_amount: String(swapResult.min_amount_out ?? ""),
+    quote_json,
+    quote_hash,
+    policy_json: JSON.stringify(policySnapshot),
+    status: "prepared",
+    expires_at: expiresAt,
+  });
+
+  const WHIRLPOOL_PROGRAM_ID = "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc";
+  db.setSwapIntentResult(intent_id, {
+    status: "succeeded",
+    signature: sig,
+    fee_lamports:
+      swapResult.estimated_network_fee_lamports != null
+        ? Number(swapResult.estimated_network_fee_lamports)
+        : null,
+    program_ids_json: JSON.stringify([WHIRLPOOL_PROGRAM_ID]),
+    error_code: "",
+    error_message: "",
+  });
 }
 
 async function prepareJupiterSwapIntent(args, env) {
@@ -1270,6 +1456,15 @@ function normalizeToolResult(name, args, rawResult) {
         result = { ...result, ok: false, error: `TOOL_RESULT_VERIFICATION_FAILED: ${error}`, verification };
       }
     }
+    if (name === "treasury_pool_swap" && result.ok === true && result.dry_run !== true) {
+      const sig = result.signature;
+      if (!isValidBase58Signature(sig)) {
+        verification = { ok: false, reason: "signature_invalid_shape", field: "signature" };
+        status = "error";
+        error = "Tool reported success but returned an invalid Solana signature shape.";
+        result = { ...result, ok: false, error: `TOOL_RESULT_VERIFICATION_FAILED: ${error}`, verification };
+      }
+    }
     if (name === "jupiter_swap_execute" && result.ok === true && result.dry_run !== true) {
       const sig = result.VERIFIED_SIGNATURE || result.signature;
       if (!isValidBase58Signature(sig)) {
@@ -1661,9 +1856,13 @@ if (!configSolanaRpc || !configSolanaRpc.trim()) configSolanaRpc = DEFAULT_SOLAN
 let configHeartbeatMs = loadConfigKey("HEARTBEAT_INTERVAL_MS") ?? process.env.HEARTBEAT_INTERVAL_MS;
 let configWorkspaceDir = loadConfigKey("WORKSPACE_DIR") ?? process.env.WORKSPACE_DIR;
 let configDataDir = loadConfigKey("DATA_DIR") ?? process.env.DATA_DIR;
+let configSolanaRpcPaceMs = loadConfigKey("SOLANA_RPC_PACE_MS") ?? process.env.SOLANA_RPC_PACE_MS ?? "";
+let configSolanaRpcStaggerMs = loadConfigKey("SOLANA_RPC_STAGGER_MS") ?? process.env.SOLANA_RPC_STAGGER_MS ?? "";
 if (configSolanaRpc) process.env.SOLANA_RPC_URL = configSolanaRpc;
 if (configWorkspaceDir) process.env.WORKSPACE_DIR = configWorkspaceDir;
 if (configDataDir) process.env.DATA_DIR = configDataDir;
+process.env.SOLANA_RPC_PACE_MS = String(configSolanaRpcPaceMs ?? "").trim();
+process.env.SOLANA_RPC_STAGGER_MS = String(configSolanaRpcStaggerMs ?? "").trim();
 if (jupiterApiKey) process.env.JUPITER_API_KEY = jupiterApiKey;
 
 /** Resolved server port (config > env > default). */
@@ -2479,6 +2678,8 @@ const server = createServer(async (req, res) => {
             PORT: String(port),
             HOST: host,
             SOLANA_RPC_URL: configSolanaRpc || "",
+            SOLANA_RPC_PACE_MS: String(configSolanaRpcPaceMs ?? "").trim(),
+            SOLANA_RPC_STAGGER_MS: String(configSolanaRpcStaggerMs ?? "").trim(),
             HEARTBEAT_INTERVAL_MS: heartbeatIntervalMs > 0 ? String(heartbeatIntervalMs) : "",
             WORKSPACE_DIR: configWorkspaceDir || "",
             DATA_DIR: configDataDir || "",
@@ -3154,7 +3355,18 @@ const server = createServer(async (req, res) => {
           return;
         }
         db.setConfig(key, enc);
-      } else if (["PORT", "HOST", "SOLANA_RPC_URL", "HEARTBEAT_INTERVAL_MS", "WORKSPACE_DIR", "DATA_DIR"].includes(key)) {
+      } else if (
+        [
+          "PORT",
+          "HOST",
+          "SOLANA_RPC_URL",
+          "HEARTBEAT_INTERVAL_MS",
+          "WORKSPACE_DIR",
+          "DATA_DIR",
+          "SOLANA_RPC_PACE_MS",
+          "SOLANA_RPC_STAGGER_MS",
+        ].includes(key)
+      ) {
         const enc = encrypt(value);
         if (!enc) {
           res.writeHead(500, { "Content-Type": "application/json" });
@@ -3180,6 +3392,12 @@ const server = createServer(async (req, res) => {
         } else if (key === "DATA_DIR") {
           configDataDir = value;
           if (value) process.env.DATA_DIR = value;
+        } else if (key === "SOLANA_RPC_PACE_MS") {
+          configSolanaRpcPaceMs = value ?? "";
+          process.env.SOLANA_RPC_PACE_MS = String(value ?? "").trim();
+        } else if (key === "SOLANA_RPC_STAGGER_MS") {
+          configSolanaRpcStaggerMs = value ?? "";
+          process.env.SOLANA_RPC_STAGGER_MS = String(value ?? "").trim();
         }
       } else {
         const enc = encrypt(value);

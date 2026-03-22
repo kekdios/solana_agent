@@ -21,8 +21,8 @@
 
 | User intent / strategy     | Use these tools |
 | -------------------------- | ---------------- |
-| **Wallet** – address, balance, send SOL/SPL, **native SABTC/SAETH/SAUSD** (**`solana_agent_token_send`** by symbol; balances via **`solana_token_balance`** with full canonical mints in **`docs/SA_AGENT_TOKENS.md`**), tx history/status (wallet is **built in**; do not ask user for address). Use **solana_balance** and **solana_address** only; there are no account_balance/account_address tools. | `solana_address`, `solana_balance`, `solana_transfer`, `solana_token_balance`, `solana_transfer_spl`, `solana_agent_token_send`, `solana_tx_history`, `solana_tx_status`, `solana_network` |
-| **Swaps / prices** – SOL or token price, swap quote (no execution) | `jupiter_price`, `jupiter_quote` |
+| **Wallet** – address, balance, send SOL/SPL, **native SABTC/SAETH/SAUSD** (balances **`solana_token_balance`** + **`token_symbol`**; send **`solana_agent_token_send`**; **treasury pool read** **`treasury_pool_info`**; **treasury swap** **`treasury_pool_swap`** Orca-only — see **`docs/TREASURY_POOL_TRADING.md`**), tx history/status (wallet **built in**). | `solana_address`, `solana_balance`, `solana_transfer`, `solana_token_balance`, `solana_transfer_spl`, `solana_agent_token_send`, **`treasury_pool_info`**, **`treasury_pool_swap`**, `solana_tx_history`, `solana_tx_status`, `solana_network` |
+| **Swaps / prices** – SOL or token price, swap quote (no execution); Hyperliquid perp mids (BTC/ETH default) | `jupiter_price`, `jupiter_quote`, **`hyperliquid_price`** |
 | **Perps** – Drift perp price, positions, place order | `drift_perp_price`, `drift_positions`, `drift_place_order` |
 | **Lending** – Kamino health, positions, deposit | `kamino_health`, `kamino_positions`, `kamino_deposit` |
 | **AMM / memecoins** – Raydium quote, pump.fun→Raydium | `raydium_quote`, `raydium_market_detect` |
@@ -72,9 +72,12 @@
 | **Solana**  | `solana_token_balance` | SPL token balance for a mint (mint; optional owner).      | `solana_token_balance({ mint: "…" })` |
 | **Solana**  | `solana_transfer_spl`  | Send SPL tokens (mint, to, amount in smallest units).      | `solana_transfer_spl({ mint: "…", to: "…", amount: "1000000" })` |
 | **Solana**  | `solana_agent_token_send` | **Native:** send **SABTC / SAETH / SAUSD** by symbol (born with canonical mints). Optional Settings overrides. Rejects if estimated network fee &gt; 0.001 SOL. **Tier 4.** | `solana_agent_token_send({ token_symbol: "SAUSD", to: "…", amount_ui: 100 })` |
+| **Solana**  | `treasury_pool_info` | **Read-only:** Whirlpool snapshot (Orca API → RPC fallback, same as solanaagent.app). **`pair`** `SABTC_SAUSD` / `SAETH_SAUSD` or **`pool_address`**. Optional **`orca_proxy_base_url`**. Not a trade quote. | `treasury_pool_info({ pair: "SABTC_SAUSD" })` |
+| **Solana**  | `treasury_pool_swap` | **Native:** swap **SABTC↔SAUSD** or **SAETH↔SAUSD** on Orca Whirlpool (SDK only). **`dry_run:true`** simulates. Live needs Swaps + execution enabled. **Tier 4.** | `treasury_pool_swap({ input_token_symbol: "SAUSD", output_token_symbol: "SABTC", amount: "1000000", dry_run: true })` |
 | **Solana**  | `solana_tx_history`   | Recent tx signatures for the app wallet (optional limit).   | `solana_tx_history({ limit: 20 })` |
 | **Solana**  | `solana_tx_status`   | Transaction status by signature.                             | `solana_tx_status({ signature: "…" })` |
 | **Jupiter** | `jupiter_price`      | SOL or token USD price (and optional 24h change).             | `jupiter_price({})` or `jupiter_price({ ids: "SOL" })` |
+| **Hyperliquid** | `hyperliquid_price` | Perp **mid** prices USD via public `info` **allMids** (default **BTC**, **ETH**). Optional **`coins`**. Not on-chain execution. | `hyperliquid_price({})` or `hyperliquid_price({ coins: ["BTC", "ETH", "SOL"] })` |
 | **Jupiter** | `jupiter_quote`      | Swap quote (no execution): input/output mint, amount.         | `jupiter_quote({ input_mint: "…", output_mint: "…", amount: "…" })` |
 | **Drift**   | `drift_perp_price`   | SOL-PERP mark price (USD).                                   | `drift_perp_price({})` |
 | **Drift**   | `drift_positions`    | User's Drift perp positions.                                  | `drift_positions({})` |
@@ -188,7 +191,7 @@ Run a shell command with the **workspace** (or a subdirectory) as the current di
 
 - **Input**: none.
 - **Output**: `{ ok: true, payload: { timestamp, status, memory_heap_used, pid } }`.
-- **Optional**: Set `HEARTBEAT_INTERVAL_MS` in `.env` to run a background heartbeat that logs to the console on that interval at server boot.
+- **Optional**: Set `HEARTBEAT_INTERVAL_MS` in Settings → Environment (or `.env` for local `node` runs). The server logs heap stats on that interval; the Electron **Chat** view also injects the default heartbeat user message on the same interval so the model follows `HEARTBEAT.md` (while Chat is visible; minimum 10s between ticks).
 
 ### 8. `cronjob`
 
@@ -272,6 +275,23 @@ All Solana wallet tools use the **app wallet** (keypair from encrypted config / 
 - **Policy**: Estimates base **network fee** via RPC; if it **exceeds 0.001 SOL** (1,000,000 lamports), returns **`ok: false`** (no send). Checks SPL balance and SOL for fee + optional new-ATA rent + small buffer before broadcasting.
 - **Output**: `{ ok: true, signature, token_symbol, mint, to, amount, amount_ui, decimals, estimated_network_fee_lamports, created_recipient_ata }` or `{ ok: false, error, … }`.
 
+### `treasury_pool_info`
+
+- **What it is:** **Read-only** snapshot of an **Orca Whirlpool**—intended for **monitoring / market-making context** (no fixed peg; spot math is from pool state). Implements the same strategy as **[solanaagent.app](https://www.solanaagent.app/sabtc.html)** / **`api-server.cjs`**: try **Orca** `GET https://api.orca.so/v2/solana/pools/{address}`; if the payload is missing or invalid, **decode the Whirlpool account + vault balances on Solana RPC** (ported from website `lib/orca-whirlpool-onchain.cjs`).
+- **Input**: `{ pair?, pool_address?, orca_proxy_base_url? }` — **`pair`**: `SABTC_SAUSD` (default) or `SAETH_SAUSD`; **`pool_address`** overrides **`pair`**. Optional **`orca_proxy_base_url`** e.g. `https://www.solanaagent.app/api` to call **`GET …/orca/pool/{address}`** first (identical JSON to the site UI). Pool defaults match **`treasury_pool_swap`** (`TREASURY_POOL_*` env overrides).
+- **Policy**: **Read-only** — allowed from **Tier 1** upward (listed with `jupiter_quote`–class tools). Uses **`SOLANA_RPC_URL`** for RPC fallback.
+- **Output**: `{ ok, pool_address, pool_data_source, data: { tokenA/B, tokenMintA/B, tokenBalanceA/B, price, feeRate, tickSpacing, tickCurrentIndex, liquidity, poolDataSource, … }, agent_report }`. **`price`** is **~token B per 1 token A** from sqrt price (indicative), **not** guaranteed execution for a size—use **`treasury_pool_swap`** with **`dry_run:true`** to simulate a trade.
+- **Refs**: Website **`/api/orca/pool/…`**, **`docs/TREASURY_POOL_TRADING.md`**.
+
+### `treasury_pool_swap`
+
+- **What it is:** **Born-with** swap on the native **Orca Whirlpool** pools: **SABTC↔SAUSD** and **SAETH↔SAUSD** only (**no Jupiter**). Same app wallet and mint map as **`solana_agent_token_send`** / **`solana_token_balance`**.
+- **Input**: `{ input_token_symbol, output_token_symbol, amount? | amount_ui?, slippage_bps?, dry_run? }` — symbols **`SABTC`**, **`SAETH`**, **`SAUSD`**; pair must be one of the two SAUSD pools. **`dry_run: true`** runs RPC simulation only (no send; does not require **`SWAPS_EXECUTION_ENABLED`**). Live swaps require **`SWAPS_ENABLED`** and **`SWAPS_EXECUTION_ENABLED`** (same Settings toggles as Jupiter execution).
+- **Policy**: **Tier 4.** Estimated base fee must be **≤ 0.001 SOL** (same cap as native token send). Uses **`@orca-so/whirlpools-sdk`** to quote and build; may create ATAs idempotently.
+- **Output (live)**: `{ ok: true, signature, input_token_symbol, output_token_symbol, pool, amount_in, estimated_amount_out, … }` or `{ ok: false, error }`.
+- **Output (dry_run)**: `{ ok: true, dry_run: true, simulation_err, simulation_logs?, … }`.
+- **Refs**: **`docs/TREASURY_POOL_TRADING.md`**, **`npm run verify:treasury-trade-path`**.
+
 ### `solana_tx_history`
 
 - **Input**: `{ limit? }` – optional, default 20, max 50.
@@ -342,6 +362,12 @@ Use for **price checks** and **swap quotes** (no execution). Prefer over Raydium
 
 - **Input**: `{ ids? }` – optional; default SOL. Comma-separated token ids or mint addresses.
 - **Output**: `{ ok, usdPrice?, priceChange24h? }` or per-id map. Use when the user asks for SOL price, token price, or "how much is X in USD".
+
+### `hyperliquid_price`
+
+- **Input**: `{ coins? }` – optional array of Hyperliquid **perp** symbols (default **`["BTC","ETH"]`**). Example: `["BTC","ETH","SOL"]`.
+- **Process**: `POST https://api.hyperliquid.xyz/info` with body `{ "type": "allMids" }` ([Hyperliquid info endpoint](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint)).
+- **Output**: `{ ok, mids_usd: { BTC, ETH, … }, mids_raw, agent_report, missing_in_response? }`. **Mid** ≈ (best bid + best ask) / 2; **not** a Solana executable price. Use with **`treasury_pool_info`** to compare external perp mids vs treasury pool implied spot (SABTC/SAETH are not spot BTC/ETH).
 
 ### `jupiter_quote`
 

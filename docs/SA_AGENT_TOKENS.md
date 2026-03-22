@@ -1,6 +1,10 @@
 # Native agent tokens (`solana_agent_token_send`)
 
-The Solana Agent is **born with** **`solana_agent_token_send`**: send **SABTC**, **SAETH**, or **SAUSD** by **symbol**—canonical mints are built in (no mint argument on send).
+The Solana Agent is **born with**:
+
+- **`solana_agent_token_send`** — send **SABTC**, **SAETH**, or **SAUSD** by **symbol** (canonical mints built in).
+- **`treasury_pool_info`** — **read-only** Whirlpool snapshot for **SABTC/SAUSD** or **SAETH/SAUSD** (or any `pool_address`): Orca API then on-chain fallback (aligned with **solanaagent.app**). Vault balances, spot price (token B per 1 token A), tick, liquidity, fees. Use for monitoring / market-making context; use **`treasury_pool_swap`** + **`dry_run:true`** for an executable quote at a chosen size.
+- **`treasury_pool_swap`** — swap **SABTC↔SAUSD** or **SAETH↔SAUSD** on Orca Whirlpools (**Orca SDK only**), same app wallet. Complements balance checks and sends. **Tier 4**; needs Swaps enabled for live execution; **`dry_run:true`** simulates without sending. See **`docs/TREASURY_POOL_TRADING.md`**.
 
 | Symbol | Role |
 |--------|------|
@@ -80,7 +84,12 @@ Store each mint under **`SA` + 2–20 alphanumeric characters** (e.g. `SABTC`, `
 
 **`agentTokens`** on **`GET /api/solana-wallet/balance`** powers the **Solana Agent tokens** panel (same derivation as **`solanaBalance`**; avoids extra RPC per mint).
 
-If you hit **429** on public RPC, set **`SOLANA_RPC_URL`** in **Settings → Environment**.
+If you hit **429** (or occasional **403**) on the default public RPC:
+
+1. **Better RPC:** set **`SOLANA_RPC_URL`** in **Settings → Environment** (e.g. [PublicNode](https://solana.publicnode.com/), [Helius](https://www.helius.dev/docs/rpc/quickstart), Alchemy, etc.).
+2. **Stay on public RPC but slow down:** in **Settings → Environment**, set **`SOLANA_RPC_PACE_MS`** to **150–300** (minimum gap between Solana-heavy tools: balances, treasury read/swap). Optionally **`SOLANA_RPC_STAGGER_MS`** **40–80** to space RPCs *inside* **`treasury_pool_info`** on-chain decode (reduces parallel bursts). Leave empty or **0** to disable.
+
+Smoke tests: **`npm run test:publicnode-agent-tools`**, **`npm run test:helius-agent-tools`** (`HELIUS_API_KEY` in `.env`; app UI still needs full **`SOLANA_RPC_URL`** — no auto-read of `HELIUS_API_KEY`).
 
 The generic **Token accounts** table **hides** these three mints so they are not duplicated.
 

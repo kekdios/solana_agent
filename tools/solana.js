@@ -1,6 +1,6 @@
 /**
  * Solana tools: balance, transfer (SOL). Agent wallet from env (SOLANA_PRIVATE_KEY or SOLANA_KEYPAIR_PATH).
- * RPC: SOLANA_RPC_URL (primary), SOLANA_RPC_FALLBACK.
+ * RPC: SOLANA_RPC_URL (primary). Optional pacing: SOLANA_RPC_PACE_MS (min gap between paced tool calls, reduces 429 on public RPC).
  */
 
 import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL, Transaction } from "@solana/web3.js";
@@ -39,7 +39,7 @@ function parsedTokenAccountToEntry(a) {
   return { mint, amount: raw, decimals, uiAmount };
 }
 
-function getRpcUrl(env = {}) {
+export function getRpcUrl(env = {}) {
   const url =
     env.SOLANA_RPC_URL ||
     process.env.SOLANA_RPC_URL ||
@@ -47,9 +47,36 @@ function getRpcUrl(env = {}) {
   return url;
 }
 
-function getConnection(env = {}) {
+export function getConnection(env = {}) {
   const url = getRpcUrl(env);
   return new Connection(url, { commitment: "confirmed" });
+}
+
+/** Parsed 0–5000 ms; 0 = disabled. */
+function parseRpcPaceMs(env = {}) {
+  const raw = String(env.SOLANA_RPC_PACE_MS ?? process.env.SOLANA_RPC_PACE_MS ?? "").trim();
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(5000, Math.floor(n));
+}
+
+let paceChain = Promise.resolve();
+let nextPaceSlot = 0;
+
+/**
+ * Enforce a minimum interval between successive Solana tool calls (global per process).
+ * Set SOLANA_RPC_PACE_MS in Settings → Environment (e.g. 150–300) when using strict public RPC.
+ */
+export async function paceSolanaRpc(env = {}) {
+  const gap = parseRpcPaceMs(env);
+  if (gap <= 0) return;
+  paceChain = paceChain.then(async () => {
+    const now = Date.now();
+    const wait = Math.max(0, nextPaceSlot - now);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    nextPaceSlot = Date.now() + gap;
+  });
+  await paceChain;
 }
 
 /** Strip whitespace, ZWSP, NBSP, line separators — models often paste broken mints. */
@@ -115,6 +142,7 @@ function parseTokenSendAmount(amountRaw, amountUi, decimals) {
  * Rejects if estimated base network fee exceeds 0.001 SOL. Checks token + SOL (fee + optional ATA rent) before sending.
  */
 export async function solanaAgentTokenSend(args, env = {}) {
+  await paceSolanaRpc(env);
   const tokenSymbol = String(args?.token_symbol ?? args?.token ?? "")
     .trim()
     .toUpperCase();
@@ -297,7 +325,7 @@ export async function solanaAgentTokenSend(args, env = {}) {
   }
 }
 
-async function getKeypair(env = {}) {
+export async function getKeypair(env = {}) {
   const keyPath = env.SOLANA_KEYPAIR_PATH || process.env.SOLANA_KEYPAIR_PATH;
   if (keyPath && existsSync(keyPath)) {
     const data = JSON.parse(readFileSync(keyPath, "utf8"));
@@ -319,6 +347,7 @@ async function getKeypair(env = {}) {
 }
 
 export async function solanaBalance(args, env = {}) {
+  await paceSolanaRpc(env);
   const keypair = await getKeypair(env);
   if (!keypair) {
     return { ok: false, error: "Solana wallet not configured. Set SOLANA_PRIVATE_KEY or SOLANA_KEYPAIR_PATH in .env" };
@@ -347,6 +376,7 @@ export async function solanaBalance(args, env = {}) {
 }
 
 export async function solanaTransfer(args, env = {}) {
+  await paceSolanaRpc(env);
   const { to, amount_sol } = args || {};
   if (!to || typeof to !== "string" || !to.trim()) {
     return { ok: false, error: "to (recipient address) required" };
@@ -397,6 +427,7 @@ export function solanaNetwork(env = {}) {
 
 /** SPL token balance for a mint (for the wallet, or optional owner address). */
 export async function solanaTokenBalance(args, env = {}) {
+  await paceSolanaRpc(env);
   const ownerRaw = args?.owner;
   const sym = String(args?.token_symbol ?? "")
     .trim()
@@ -497,6 +528,7 @@ export async function solanaTokenBalance(args, env = {}) {
 
 /** Transfer SPL tokens. Creates recipient ATA if needed. */
 export async function solanaTransferSpl(args, env = {}) {
+  await paceSolanaRpc(env);
   const { mint, to, amount, decimals } = args || {};
   if (!mint || !to || amount == null) {
     return { ok: false, error: "mint, to, and amount are required" };
@@ -566,6 +598,7 @@ export async function solanaTransferSpl(args, env = {}) {
 
 /** Recent transaction signatures for the wallet (like account_tx_history). */
 export async function solanaTxHistory(args, env = {}) {
+  await paceSolanaRpc(env);
   const keypair = await getKeypair(env);
   if (!keypair) {
     return { ok: false, error: "Solana wallet not configured", signatures: [] };
@@ -591,6 +624,7 @@ export async function solanaTxHistory(args, env = {}) {
 
 /** Transaction status by signature (like account_tx_status). */
 export async function solanaTxStatus(args, env = {}) {
+  await paceSolanaRpc(env);
   const { signature } = args || {};
   if (!signature || typeof signature !== "string" || !signature.trim()) {
     return { ok: false, error: "signature (transaction signature) required" };

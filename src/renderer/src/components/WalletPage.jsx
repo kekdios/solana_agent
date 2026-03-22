@@ -692,7 +692,7 @@ export default function WalletPage({ onOpenSettings }) {
           </p>
         </section>
 
-        {/* Recent activity — source: on-chain (RPC). Agent badge = executed by this app via jupiter_swap_execute. */}
+        {/* Recent activity — on-chain (RPC). Agent badge = succeeded rows in swap_intents (jupiter_swap_execute + live treasury_pool_swap). */}
         <section className="rounded-2xl border border-[#1e1e24] bg-[#121214] p-5">
           <div className="flex items-center justify-between gap-2 mb-3">
             <div>

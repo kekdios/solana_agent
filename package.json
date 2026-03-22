@@ -4,8 +4,12 @@
   "type": "module",
   "main": "electron-main.cjs",
   "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
     "@drift-labs/sdk": "^2.155.0",
-    "@solana/spl-token": "^0.4.13",
+    "@orca-so/whirlpools-sdk": "^0.20.0",
+    "@solana/codecs-data-structures": "2.0.0-rc.1",
+    "@solana/codecs-strings": "2.0.0-rc.1",
+    "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
     "better-sqlite3": "^11.6.0",
     "bs58": "^6.0.0",
@@ -41,7 +45,12 @@
     "test:in-process-server": "node scripts/test-in-process-server.js",
     "test:clawstr": "node scripts/test-clawstr-e2e.js",
     "inspect:wallet-tokens": "node scripts/inspect-wallet-tokens.js",
-    "test:agent-token-send": "node scripts/test-agent-token-send.js"
+    "test:agent-token-send": "node scripts/test-agent-token-send.js",
+    "check:treasury-jupiter-routes": "node scripts/check-treasury-jupiter-routes.js",
+    "verify:treasury-trade-path": "node scripts/verify-treasury-trade-path.js",
+    "test:treasury-pool-swap-dry": "node scripts/test-treasury-pool-swap-dry.js",
+    "test:publicnode-agent-tools": "node scripts/test-agent-tools-publicnode.js",
+    "test:helius-agent-tools": "node scripts/test-agent-tools-helius.js"
   },
   "build": {
     "appId": "com.solana.agent.trader",

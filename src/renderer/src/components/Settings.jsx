@@ -32,6 +32,8 @@ export default function Settings({ onClose }) {
   const [envHeartbeatMs, setEnvHeartbeatMs] = useState("");
   const [envWorkspaceDir, setEnvWorkspaceDir] = useState("");
   const [envDataDir, setEnvDataDir] = useState("");
+  const [envSolanaRpcPaceMs, setEnvSolanaRpcPaceMs] = useState("");
+  const [envSolanaRpcStaggerMs, setEnvSolanaRpcStaggerMs] = useState("");
   const [savingEnv, setSavingEnv] = useState(false);
   const [savingNetwork, setSavingNetwork] = useState(false);
   const [testingSolanaRpc, setTestingSolanaRpc] = useState(false);
@@ -72,6 +74,8 @@ export default function Settings({ onClose }) {
       setEnvHeartbeatMs(env.HEARTBEAT_INTERVAL_MS ?? "");
       setEnvWorkspaceDir(env.WORKSPACE_DIR ?? "");
       setEnvDataDir(env.DATA_DIR ?? "");
+      setEnvSolanaRpcPaceMs(env.SOLANA_RPC_PACE_MS ?? "");
+      setEnvSolanaRpcStaggerMs(env.SOLANA_RPC_STAGGER_MS ?? "");
     }
   }, [config?.env]);
 
@@ -458,6 +462,8 @@ export default function Settings({ onClose }) {
       { key: "HEARTBEAT_INTERVAL_MS", value: envHeartbeatMs.trim() },
       { key: "WORKSPACE_DIR", value: envWorkspaceDir.trim() },
       { key: "DATA_DIR", value: envDataDir.trim() },
+      { key: "SOLANA_RPC_PACE_MS", value: envSolanaRpcPaceMs.trim() },
+      { key: "SOLANA_RPC_STAGGER_MS", value: envSolanaRpcStaggerMs.trim() },
     ];
     try {
       for (const { key, value } of keys) {
@@ -894,6 +900,11 @@ export default function Settings({ onClose }) {
             <p className="text-xs text-slate-500 mt-2">
               Current: <span className="text-slate-400">{config?.solanaNetwork || "testnet"}</span>
             </p>
+            <p className="text-xs text-slate-500 mt-2 border-t border-[#2a2a30] pt-2">
+              <span className="text-slate-400">Custom RPC URL</span> (e.g. PublicNode, Helius): use{" "}
+              <span className="text-slate-300 font-medium">Environment (config table)</span> below →{" "}
+              <span className="font-mono text-slate-400">SOLANA_RPC_URL</span> → Save environment.
+            </p>
           </section>
 
           <section className="rounded-xl bg-[#222228] border border-[#2a2a30] p-4">
@@ -1207,14 +1218,43 @@ export default function Settings({ onClose }) {
                 />
               </div>
               <div>
+                <label className="text-xs text-slate-500 block mb-1">SOLANA_RPC_PACE_MS</label>
+                <input
+                  type="text"
+                  value={envSolanaRpcPaceMs}
+                  onChange={(e) => setEnvSolanaRpcPaceMs(e.target.value)}
+                  placeholder="0 = off; try 150–300 on public RPC"
+                  className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Min milliseconds between Solana-heavy tools (balances, treasury pool read/swap). Reduces 429 bursts.
+                </p>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">SOLANA_RPC_STAGGER_MS</label>
+                <input
+                  type="text"
+                  value={envSolanaRpcStaggerMs}
+                  onChange={(e) => setEnvSolanaRpcStaggerMs(e.target.value)}
+                  placeholder="0 = off; try 40–80 for treasury_pool_info on-chain path"
+                  className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Delay between each RPC inside <span className="font-mono text-slate-400">treasury_pool_info</span> pool decode (max 500 ms capped).
+                </p>
+              </div>
+              <div>
                 <label className="text-xs text-slate-500 block mb-1">HEARTBEAT_INTERVAL_MS</label>
                 <input
                   type="text"
                   value={envHeartbeatMs}
                   onChange={(e) => setEnvHeartbeatMs(e.target.value)}
-                  placeholder="30000 or leave empty to disable"
+                  placeholder="1800000 (30m) or leave empty to disable"
                   className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                 />
+                <p className="text-xs text-slate-500 mt-1">
+                  While the Chat view is open, the app sends the default heartbeat user message on this interval so the agent follows <span className="font-mono text-slate-400">HEARTBEAT.md</span> (min 10s). Empty = off. Server still logs heap stats on the same interval when enabled. After changing this, switch to another screen (e.g. Wallet) and back to Chat to pick up a new interval without reloading.
+                </p>
               </div>
               <div>
                 <label className="text-xs text-slate-500 block mb-1">WORKSPACE_DIR</label>

@@ -327,7 +327,7 @@ export function getLastSwapCreatedAt(walletPubkey) {
   return row?.created_at || null;
 }
 
-/** Signatures of swaps executed by this agent (jupiter_swap_execute succeeded). Used to flag "Agent" on wallet UI. */
+/** Signatures of swaps executed by this agent (jupiter_swap_execute + treasury_pool_swap; swap_intents status succeeded). Used to flag "Agent" on wallet UI. */
 export function getAgentExecutedSignatures(walletPubkey) {
   const wallet = String(walletPubkey || "").trim();
   if (!wallet) return [];
