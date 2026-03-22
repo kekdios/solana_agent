@@ -17,7 +17,7 @@ export default defineConfig({
     },
   },
   define: {
-    __APP_VERSION__: JSON.stringify(pkg.version || "1.0.0.0"),
+    __APP_VERSION__: JSON.stringify(pkg.version || "3.0.0"),
   },
   build: {
     outDir: path.join(__dirname, "dist-renderer"),

@@ -28,7 +28,7 @@ if (!process.env.SOLANA_PRIVATE_KEY) {
   const possibleDbPaths = [
     process.env.DB_PATH,
     join(projectRoot, "data", "solagent.db"),
-    process.env.HOME && join(process.env.HOME, "Library", "Application Support", "solagent", "data", "solagent.db"),
+    process.env.HOME && join(process.env.HOME, "Library", "Application Support", "solagent", "data", "solagent.db"), // legacy Electron data
   ].filter(Boolean);
   for (const dbPath of possibleDbPaths) {
     if (!existsSync(dbPath)) continue;

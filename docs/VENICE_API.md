@@ -258,7 +258,7 @@ Comparison of the **current app implementation** to what this document describes
 | **Auth** `Authorization: Bearer <key>` | Chat and test use `Authorization: Bearer ${activeKey}` (key from `VENICE_ADMIN_KEY`) | ✅ Matches |
 | **Model** `venice-uncensored` | `getChatBackendConfig()` returns `model: "venice-uncensored"` | ✅ Matches |
 | **Body** `model`, `messages`, `max_tokens` | Chat: `model`, `messages`, `max_tokens: 8192`; test: `model`, `messages: [{ role: "user", content: "Hi" }]`, `max_tokens: 10` | ✅ Matches |
-| **Tools** (OpenAI-compatible) | Same request shape as Inception: `tools`, `tool_choice: "auto"` when `sendTools` | ✅ Matches |
+| **Tools** (OpenAI-compatible) | Same request shape as Inception: `tools`, `tool_choice: "auto"` on **every** chat request (V3; no keyword gating) | ✅ Matches |
 | **venice_parameters** (`include_venice_system_prompt: false`) | Sent for Venice so only the app’s system prompt is used. | ✅ Implemented. |
 | **prompt_cache_key** | Sent for Venice as `conversationId` for multi-turn cache routing. | ✅ Implemented. |
 | **Response headers** (CF-RAY) | Venice: `CF-RAY` is logged to console for support. Balance/rate limits not surfaced in UI. | ✅ CF-RAY logged; balance/limits optional. |

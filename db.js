@@ -41,6 +41,7 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_token_usage_conversation ON token_usage(conversation_id);
   CREATE INDEX IF NOT EXISTS idx_token_usage_recorded_at ON token_usage(recorded_at);
+  -- Encrypted key/value store (Settings). Examples: API keys, CLAWSTR_AGENT_CODE, PORT, SOLANA_RPC_URL, wallet keys.
   CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
     value_encrypted TEXT NOT NULL,

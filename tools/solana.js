@@ -13,6 +13,39 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const SPL_TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const SPL_TOKEN_2022_PROGRAM_ID = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
+/** Canonical mainnet mints — labels for solana_balance only; do not guess other tickers in chat. */
+const WELL_KNOWN_MAINNET_SPL_SYMBOL = Object.freeze({
+  EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: "USDC",
+  Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: "USDT",
+});
+
+/** Built-in Solana Agent SPL mints (same as server DEFAULT_SA_AGENT_TOKEN_MINTS). */
+const BUILTIN_AGENT_MINT_SYMBOL = Object.freeze({
+  "2kR1UKhrXq6Hef6EukLyzdD5ahcezRqwURKdtCJx2Ucy": "SABTC",
+  AhyZRrDrN3apDzZqdRHtpxWmnqYDdL8VnJ66ip1KbiDS: "SAETH",
+  CK9PodBifHymLBGeZujExFnpoLCsYxAw7t8c8LsDKLxG: "SAUSD",
+});
+
+/**
+ * Single display symbol per balance row. Well-known SPL wins over configured agent map
+ * so e.g. USDT mint is never labeled SABTC even if an operator override points SABTC at that mint.
+ */
+function tokenSymbolForBalanceMint(mint, env) {
+  const m = String(mint || "").trim();
+  if (!m) return null;
+  const well = WELL_KNOWN_MAINNET_SPL_SYMBOL[m];
+  if (well) return well;
+  const built = BUILTIN_AGENT_MINT_SYMBOL[m];
+  if (built) return built;
+  const map = env.saAgentTokenMap;
+  if (map && typeof map === "object") {
+    for (const [sym, addr] of Object.entries(map)) {
+      if (String(addr || "").trim() === m) return String(sym).toUpperCase();
+    }
+  }
+  return null;
+}
+
 /** Normalize parsed token account for wallet list / balances (legacy + Token-2022). */
 function parsedTokenAccountToEntry(a) {
   const info = a.account?.data?.parsed?.info;
@@ -37,6 +70,24 @@ function parsedTokenAccountToEntry(a) {
     }
   }
   return { mint, amount: raw, decimals, uiAmount };
+}
+
+/**
+ * Merge legacy + Token-2022 RPC results without double-counting the same ATA.
+ * Some RPCs return the same token account pubkey for both programId filters when `mint` is set.
+ */
+function dedupeParsedTokenAccountsByPubkey(rows) {
+  const byPk = new Map();
+  for (const a of rows || []) {
+    if (!a?.pubkey) continue;
+    try {
+      const pk = a.pubkey.toBase58();
+      if (!byPk.has(pk)) byPk.set(pk, a);
+    } catch {
+      /* skip malformed */
+    }
+  }
+  return [...byPk.values()];
 }
 
 export function getRpcUrl(env = {}) {
@@ -361,14 +412,25 @@ export async function solanaBalance(args, env = {}) {
       conn.getParsedTokenAccountsByOwner(pubkey, { programId: SPL_TOKEN_PROGRAM_ID }),
       conn.getParsedTokenAccountsByOwner(pubkey, { programId: SPL_TOKEN_2022_PROGRAM_ID }),
     ]);
-    const combined = [...(legacyRes.value || []), ...(t22Res.value || [])];
-    const tokens = combined.map(parsedTokenAccountToEntry).filter(Boolean);
+    const combined = dedupeParsedTokenAccountsByPubkey([
+      ...(legacyRes.value || []),
+      ...(t22Res.value || []),
+    ]);
+    const tokens = combined
+      .map(parsedTokenAccountToEntry)
+      .filter(Boolean)
+      .map((t) => {
+        const token_symbol = tokenSymbolForBalanceMint(t.mint, env);
+        return token_symbol ? { ...t, token_symbol } : t;
+      });
     return {
       ok: true,
       address: pubkey.toBase58(),
       sol,
       lamports,
       tokens: tokens.length ? tokens : undefined,
+      balance_symbol_note:
+        "Each SPL row may include token_symbol only for well-known mints (e.g. USDC, USDT) or built-in agent mints (SABTC, SAETH, SAUSD). Otherwise use mint + decimals + uiAmount only—do not invent tickers.",
     };
   } catch (e) {
     return { ok: false, error: e.message || String(e) };
@@ -472,7 +534,10 @@ export async function solanaTokenBalance(args, env = {}) {
         programId: SPL_TOKEN_2022_PROGRAM_ID,
       }),
     ]);
-    const rawRows = [...(legacyRes.value || []), ...(t22Res.value || [])];
+    const rawRows = dedupeParsedTokenAccountsByPubkey([
+      ...(legacyRes.value || []),
+      ...(t22Res.value || []),
+    ]);
     const accounts = rawRows.map((a) => {
       const entry = parsedTokenAccountToEntry(a);
       if (!entry) {

@@ -15,6 +15,12 @@
 - Report execution proof with full values only (no `abc...xyz` truncation for signatures/IDs when asserting success).
 - If tool mode is simulated/dry-run/stub, explicitly state that no live transaction/post occurred.
 
+### Solana Agent V3 — `POST /api/chat` behavior
+
+- **Tools on every request:** The server **always** includes the enabled tool definitions and `tool_choice: "auto"` (OpenAI-compatible) for each completion round—no keyword gating.
+- **In-app only:** Answers that require **`workspace_*`** or wallet tools only apply when the user chats through **this app** hitting your server. Other UIs (e.g. generic IDE chat) are not wired to `server.js`.
+- **`HEARTBEAT.md` shortcut:** When the last user message clearly asks for the **content** of `heartbeat.md` / `HEARTBEAT.md`, **`server.js` may read the file from `WORKSPACE_DIR`** and return it **without** calling the LLM for that turn (deterministic; avoids models skipping `workspace_read`). Other paths still use **`workspace_tree`** / **`workspace_read`**.
+
 ---
 
 ## Strategies at a glance
@@ -31,7 +37,7 @@
 | **Workspace** – discover and read/write/delete; no hardcoded paths | `workspace_tree` (full tree + file_paths), `workspace_list` (one level), `workspace_read`, `workspace_write`, `workspace_delete` |
 | **Sandbox / exec** – run shell commands in the workspace (create programs with workspace_write, then run them) | `exec` |
 | **Memory** – past conversations | `conversation_search` |
-| **Clawstr (solanaagent.app)** – post via **`bulletin_post`**; read-only: **`clawstr_health`**, **`clawstr_feed`**, **`clawstr_communities`**, **`bulletin_public_feed`**, **`bulletin_public_health`**. Supporting: `bulletin_create_payment_intent`, `bulletin_get_latest_intent`; `bulletin_approve_and_post` = alias. Payment-intent URL is **POST-only** (GET → 404). | `bulletin_post`, `bulletin_create_payment_intent`, `bulletin_get_latest_intent`, `bulletin_approve_and_post`, `clawstr_health`, `clawstr_feed`, `clawstr_communities`, `bulletin_public_feed`, `bulletin_public_health` |
+| **Clawstr (solanaagent.app)** – post via **`bulletin_post`** (free **`agent_code`**; set **`CLAWSTR_AGENT_CODE`**). Read-only: **`clawstr_health`**, **`clawstr_feed`**, **`clawstr_communities`**, **`bulletin_public_feed`**, **`bulletin_public_health`**. Supporting: `bulletin_create_payment_intent`, `bulletin_get_latest_intent` (sidebar / paid path); `bulletin_approve_and_post` = alias of **`bulletin_post`**. Payment-intent URL is **POST-only** (GET → 404). | `bulletin_post`, `bulletin_create_payment_intent`, `bulletin_get_latest_intent`, `bulletin_approve_and_post`, `clawstr_health`, `clawstr_feed`, `clawstr_communities`, `bulletin_public_feed`, `bulletin_public_health` |
 | **Web / API** – browse, fetch URL | `browse`, `fetch_url` |
 
 ---
@@ -99,10 +105,12 @@
 - **Input**: A free-form text query **or** a full URL.
 - **Process**:
   1. If input is a URL → fetch that URL directly.
-  2. Else call DuckDuckGo Instant Answer API and take the first result URL.
-  3. If DuckDuckGo returns nothing, try to extract a domain from the query and fetch `https://<domain>`.
-  4. Fetch the page (no JS execution), strip HTML → plain text (≈ 2000 chars excerpt).
+  2. Else **DuckDuckGo Instant Answer** for the raw query, then again for a **simplified** query (strips phrases like “find out more about”, “what is”, “tell me about”) — DDG often returns empty for full sentences.
+  3. If still no URL → **Wikipedia opensearch** (same two query strings; no API key; requires `User-Agent`).
+  4. If still no URL → extract a **domain** from the query and try `https://<domain>` / `https://www.<domain>`.
+  5. Fetch the chosen page (no JS execution), strip HTML → plain text (≈ 2000 chars excerpt).
 - **Output**: `{ title, url, snippet, excerpt, timestamp }`.
+- **Test**: `npm run test:browse` (network required).
 
 ### 2. `generate_image`
 
@@ -135,7 +143,9 @@
 
 ## Workspace (discovery and files)
 
-**No hardcoded file lists.** The agent discovers files with `workspace_tree` and `workspace_list`, and reads with `workspace_read`. To **run commands** (e.g. scripts created with workspace_write), use **`exec`**.
+**No hardcoded file lists — no invented trees.** For "list workspace", "ls", or directory questions, the agent **must** call `workspace_tree` or `workspace_list` (or `exec` with `ls`/`find`) in that turn and report **only** tool output. **Forbidden:** fabricating `/app`, fake `src/`, `logs/`, sizes, or claiming "no tools" when these exist. The SQLite DB lives under **`data/solagent.db`**, not at workspace root.
+
+The agent discovers files with `workspace_tree` and `workspace_list`, and reads with `workspace_read`. To **run commands** (e.g. scripts created with workspace_write), use **`exec`**.
 
 ### `workspace_tree`
 
@@ -191,8 +201,8 @@ Run a shell command with the **workspace** (or a subdirectory) as the current di
 
 - **Input**: none.
 - **Output**: `{ ok: true, payload: { timestamp, status, memory_heap_used, pid } }`.
-- **Optional**: Set `HEARTBEAT_INTERVAL_MS` in Settings → Environment (or `.env` for local `node` runs). The server logs heap stats on that interval; the Electron **Chat** view also injects the default heartbeat user message on the same interval so the model follows **`HEARTBEAT.md`** (while Chat is visible; minimum 10s between ticks).
-- **`HEARTBEAT.md`**: Workspace-relative checklist (e.g. peg/treasury checks). **Repo template:** `workspace/HEARTBEAT.md`. **Electron (macOS):** `~/Library/Application Support/solagent/workspace/HEARTBEAT.md`. **`node server.js` from repo:** `agent/workspace/HEARTBEAT.md`. Edit freely; keep it short. If the file is missing, the model should not fabricate a write—use **`workspace_write`** and verify with **`workspace_read`** or the path on disk.
+- **Optional**: Set `HEARTBEAT_INTERVAL_MS` in Settings → Environment (or `.env` for local `node` runs). The server logs heap stats on that interval; the **Chat** view also injects the default heartbeat user message on the same interval so the model follows **`HEARTBEAT.md`** (while Chat is visible; minimum 10s between ticks).
+- **`HEARTBEAT.md`**: Workspace-relative checklist (e.g. peg/treasury checks). **Default path:** `workspace/HEARTBEAT.md` (or `WORKSPACE_DIR` if set). Edit freely; keep it short. If the file is missing, the model should not fabricate a write—use **`workspace_write`** and verify with **`workspace_read`** or the path on disk.
 
 ### 8. `cronjob`
 
@@ -288,7 +298,7 @@ All Solana wallet tools use the **app wallet** (keypair from encrypted config / 
 ### `treasury_pool_swap`
 
 - **What it is:** **Born-with** swap on the native **Orca Whirlpool** pools: **SABTC↔SAUSD** and **SAETH↔SAUSD** only (**no Jupiter**). Same app wallet and mint map as **`solana_agent_token_send`** / **`solana_token_balance`**.
-- **Input**: `{ input_token_symbol, output_token_symbol, amount? | amount_ui?, slippage_bps?, dry_run? }` — symbols **`SABTC`**, **`SAETH`**, **`SAUSD`**; pair must be one of the two SAUSD pools. **`dry_run: true`** runs RPC simulation only (no send; does not require **`SWAPS_EXECUTION_ENABLED`**). Live swaps require **`SWAPS_ENABLED`** and **`SWAPS_EXECUTION_ENABLED`** (same Settings toggles as Jupiter execution).
+- **Input**: `{ input_token_symbol, output_token_symbol, amount? | amount_ui?, slippage_bps?, dry_run? }` — symbols **`SABTC`**, **`SAETH`**, **`SAUSD`**; pair must be one of the two SAUSD pools. **`dry_run: true`** runs RPC simulation only (no send). **Live** swaps are **not** gated by **`SWAPS_ENABLED`** / **`SWAPS_EXECUTION_ENABLED`** (those apply to Jupiter); **`server.js`** only applies those to Jupiter paths.
 - **Policy**: **Tier 4.** Estimated base fee must be **≤ 0.001 SOL** (same cap as native token send). Uses **`@orca-so/whirlpools-sdk`** to quote and build; may create ATAs idempotently.
 - **Output (live)**: `{ ok: true, signature, input_token_symbol, output_token_symbol, pool, amount_in, estimated_amount_out, … }` or `{ ok: false, error }`.
 - **Output (dry_run)**: `{ ok: true, dry_run: true, simulation_err, simulation_logs?, … }`.
@@ -308,14 +318,14 @@ All Solana wallet tools use the **app wallet** (keypair from encrypted config / 
 
 ## Clawstr on solanaagent.app
 
-Autonomous paid posts: **no human sidebar button**. No dedicated Tier-4 requirement (same tier rules as other tools; Tier 1 cannot run mutating tools).
+Autonomous posts via **`bulletin_post`** use the **free `agent_code` API** only (no SOL). Requires **`CLAWSTR_AGENT_CODE`** in Settings or `.env` with **`./run.sh`**. No dedicated Tier-4 requirement (Tier 1 cannot run mutating tools). The app sidebar may still use a separate **paid** HTTP flow.
 
 ### `bulletin_post`
 
-- **Input**: `{ content, wallet_address? }` – post body; optional wallet for intent creation if none cached (defaults to app wallet).
-- **Process**: Create or reuse cached payment intent → verify balance ≥ payment lamports + fee reserve → transfer SOL with memo → `POST /api/v1/bulletin/post` with `payment_intent_id`, `content`, `tx_signature`.
-- **Output (success)**: `{ ok: true, stage: "posted", payment_intent_id, tx_signature, nostr_event_id, … }`.
-- **Output (failure)**: `{ ok: false, stage: "balance"|"intent"|"transfer"|"post"|"validate", error, … }` — report exactly; do not claim posted without `ok: true`.
+- **Input**: `{ content, wallet_address? }` – post body; `wallet_address` is ignored (schema compatibility).
+- **Process**: `POST /api/v1/bulletin/post` with `agent_code` (from config/env) + `content`. If `CLAWSTR_AGENT_CODE` is missing, returns `ok: false`, `stage: "validate"`.
+- **Output (success)**: `{ ok: true, stage: "posted", mode: "agent_code", nostr_event_id, post, … }` (no `tx_signature`).
+- **Output (failure)**: `{ ok: false, stage: "validate"|"post", error, … }` — report exactly; do not claim posted without `ok: true`.
 
 ### `bulletin_approve_and_post`
 

@@ -62,7 +62,7 @@ export default function Sidebar() {
     const year = d.getFullYear();
     return `${day}-${month}-${year}`;
   })();
-  const appVersion = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "1.0.0.0";
+  const appVersion = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "3.0.0";
 
   return (
     <aside className="w-60 shrink-0 flex flex-col border-r border-[#1e1e24] bg-[#121214]">
@@ -160,7 +160,7 @@ export default function Sidebar() {
           type="button"
           onClick={() => restartServer()}
           className={navItemClass}
-          title="Restart server"
+          title="Reload the web app (does not stop Node — use terminal Ctrl+C to stop the server)"
         >
           <span className={iconClass} aria-hidden>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -168,7 +168,7 @@ export default function Sidebar() {
               <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
             </svg>
           </span>
-          Restart
+          Reload
         </button>
         <button
           type="button"
@@ -379,8 +379,8 @@ export default function Sidebar() {
         >
           solanaagent.app
         </a>
-        <p className="text-xs text-slate-500 font-mono" title="App version">
-          V {appVersion} - {versionDate}
+        <p className="text-xs text-slate-500 font-mono" title={`Solana Agent V3 (${appVersion})`}>
+          V3 · {appVersion} · {versionDate}
         </p>
       </div>
     </aside>

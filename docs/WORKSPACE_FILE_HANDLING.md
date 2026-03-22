@@ -10,7 +10,7 @@ This document describes the workspace file-handling implementation in `tools/wor
 - **Role:** CRUD and discovery for files under a single **workspace** directory. Used by the chat agent via HTTP API tool calls (`workspace_read`, `workspace_write`, `workspace_delete`, `workspace_list`, `workspace_tree`). The **exec** tool (`tools/exec.js`) runs shell commands with this same workspace as the current working directory (sandbox).
 - **Invoker:** `server.js` calls these functions with arguments from the LLM; results are JSON-serialized and sent back in the chat flow. The agent (and thus the user) can only access paths under the workspace root.
 
-**Conventional files:** Besides persona/rules (`SOUL.md`, `AGENTS.md`, `tools.md`, skills), the repo ships **`HEARTBEAT.md`** — an optional checklist the model follows when a **chat heartbeat** fires (see root **README.md** and **`HEARTBEAT_INTERVAL_MS`** in Settings). Path is always under **`WORKSPACE_DIR`** (repo `workspace/` when running `node server.js`; app userData `workspace/` when running Electron).
+**Conventional files:** Besides persona/rules (`SOUL.md`, `AGENTS.md`, `tools.md`, skills), the repo ships **`HEARTBEAT.md`** — an optional checklist the model follows when a **chat heartbeat** fires (see root **README.md** and **`HEARTBEAT_INTERVAL_MS`** in Settings). Path is always under **`WORKSPACE_DIR`** (default: repo `workspace/` when running `node server.js`).
 
 ---
 
@@ -21,7 +21,7 @@ const WORKSPACE_DIR = process.env.WORKSPACE_DIR || join(__dirname, "..", "worksp
 ```
 
 - **Default:** Directory named `workspace` one level above the `tools/` folder (i.e. project root `workspace/` when running from repo).
-- **Override:** Set `WORKSPACE_DIR` to an absolute path (e.g. in Electron packaged app, often a path under `userData` or inside the .app bundle).
+- **Override:** Set `WORKSPACE_DIR` to an absolute path (e.g. a dedicated folder on disk).
 - **No trailing slash** in the variable; paths are built with `path.join()`.
 
 ---
@@ -143,6 +143,8 @@ const WORKSPACE_DIR = process.env.WORKSPACE_DIR || join(__dirname, "..", "worksp
 
 - **Registration:** In `server.js`, `workspace_read`, `workspace_write`, `workspace_delete`, `workspace_list`, `workspace_tree` are in `PARAM_SCHEMAS` and in the `runTool` switch. Arguments come from the LLM (e.g. `args.path`, `args.content`, `args.max_depth`).
 - **Invocation:** `runTool(name, args, env)` calls the corresponding function; return value is JSON-stringified and pushed into the conversation as a tool message, so the model sees the exact `{ ok, path, content }` (or error) for reads.
+- **Chat tools (V3):** Every `POST /api/chat` turn sends the full tool list to the provider (`tool_choice: "auto"`). System text reminds the model that claiming “no tools” is incorrect for this app.
+- **HEARTBEAT read shortcut:** Before the LLM loop, if the last user message matches an explicit “content of `heartbeat.md` / `HEARTBEAT.md`” pattern, `server.js` calls **`workspace.workspaceRead("HEARTBEAT.md")`** (then `heartbeat.md` if needed) and returns the assistant message immediately—same security as a normal read (paths under `WORKSPACE_DIR` only).
 - **No extra auth:** Within the app, whoever can send chat messages can trigger these tools; there is no per-user or per-request workspace isolation in this module (single shared `WORKSPACE_DIR`).
 
 ---

@@ -306,6 +306,7 @@ export default function ChatArea() {
    * When Settings → HEARTBEAT_INTERVAL_MS is set, periodically POST the default heartbeat
    * user prompt so the agent runs HEARTBEAT.md checks in this conversation (while Chat is open).
    * Server-side startHeartbeat still only logs memory to the console.
+   * (V3: explicit “content of heartbeat.md” user messages are answered from disk in server.js before the LLM.)
    */
   useEffect(() => {
     // Match sendMessage: apiBase is often "" (App resets it); relative `/api/config` works on same origin.

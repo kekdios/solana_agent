@@ -28,6 +28,7 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
+    document.title = "Solana Agent V3";
     setApiBase("");
     fetchConversations();
     fetchUsageTotal();

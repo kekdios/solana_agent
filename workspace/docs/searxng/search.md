@@ -1,3 +1,0 @@
-# https://docs.searxng.org/search.html
-
-Search &#8212; SearXNG Documentation (2026.3.10+8b95b2058) Navigation index modules | SearXNG Documentation (2026.3.10+8b95b2058) &#187; Search Search Please activate JavaScript to enable the search functionality. Searching for multiple words only shows matches that contain all words. Table of Contents User information Why use a private instance? Administrator documentation Developer documentation DevOps tooling box Source-Code Project Links Source Wiki Public instances Issue Tracker Navigation Overview &#169; Copyright SearXNG team.

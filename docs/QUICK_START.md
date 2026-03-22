@@ -1,22 +1,27 @@
 # Quick start (agent owners)
 
-This guide is for **owners/operators** of the Solana Agent desktop app (not developers). It assumes you’re running locally on your machine.
+This guide is for **owners/operators** of **Solana Agent V3** (not developers). It assumes you’re running locally on your machine.
+
+**V3 reminders**
+
+- Use the **in-app Chat** (same origin as your server, e.g. `http://127.0.0.1:3333`) for questions that need **workspace files** or **wallet tools**. Other chat UIs do not call your `POST /api/chat`.
+- The server **always** sends **function tools** to the model on each turn. For a direct question like “what is the content of **heartbeat.md**?”, the server may **read `HEARTBEAT.md` from disk** and answer without the LLM—see root **README.md**.
 
 ---
 
 ## 1) Start the app
 
-- **From source (developer run)**:
+- **From source (recommended):**
 
 ```bash
 cd agent
 npm install
-npm run electron
+./build-and-run.sh
 ```
 
-- **Packaged app**: open the `.app` normally.
+This builds the web UI, starts **`node server.js`**, and opens your browser (default **http://127.0.0.1:3333**).
 
-The UI will load locally (usually `http://127.0.0.1:3333`).
+- **Manual:** `npm run build:renderer && node server.js`, then open the URL printed in the terminal.
 
 ---
 
@@ -38,162 +43,13 @@ All keys saved in Settings are stored in the app’s **SQLite config table** and
 
 ## 3) Create/import your Solana wallet (the app wallet)
 
-In **Settings → Solana Wallet**:
+In **Settings → Solana Wallet**: generate or import a wallet, fund it with SOL, and complete backup steps.
 
-- **Generate** a new wallet, or
-- **Import** your private key (base58)
-
-Then:
-
-- Copy the **public address** and fund it with a small amount of SOL for testing.
-- **Back up** the wallet as instructed (don’t skip this).
+Then continue from the root **README.md** and **TOOLS.md**: security **tier** (Tier 4 for swap execution), **Swaps** toggles, **Clawstr** (`CLAWSTR_AGENT_CODE`), optional **`HEARTBEAT_INTERVAL_MS`** for periodic checklist messages in Chat.
 
 ---
 
-## 4) Pick your security tier (important)
+## Reload vs restart
 
-In **Settings → Security tier**:
-
-- **Tier 1–3**: safer defaults (no sovereign swaps execution)
-- **Tier 4**: required for **funds movement** tools (including swaps)
-
-Recommendation: use **Tier 4 only when you intend to use the wallet actively**.
-
----
-
-## 5) Wallet page: verify balances
-
-Open **Wallet** (sidebar) to verify:
-
-- SOL balance (and explorer link)
-- **Solana Agent tokens** — **SABTC**, **SAETH**, **SAUSD** (native symbols; built-in mints). In chat: **`solana_token_balance`** with the canonical mint to read one token; **`solana_agent_token_send`** to send (Tier 4)
-- **Token accounts** — other SPLs (the three agent tokens are **not** duplicated here)
-
-If you just funded the wallet, hit **Refresh**.
-
-In chat: **`docs/SA_AGENT_TOKENS.md`** lists canonical mints for balance checks; **`solana_agent_token_send`** to send (Tier 4 + clear user intent).
-
----
-
-## 5a) Optional: Periodic chat heartbeat (`HEARTBEAT.md`)
-
-If you want the agent to run a **repeatable checklist** (e.g. peg / treasury checks) while you keep the **Chat** screen open:
-
-| What | Where |
-|------|--------|
-| **Interval** | **Settings → Environment → `HEARTBEAT_INTERVAL_MS`** (milliseconds). Example: `1800000` = 30 minutes. Empty = off. Minimum effective tick in the UI is 10 seconds. |
-| **Checklist file** | **`HEARTBEAT.md`** in the **workspace** folder the app uses. **Electron (macOS):** `~/Library/Application Support/solagent/workspace/HEARTBEAT.md`. **Running from repo:** `agent/workspace/HEARTBEAT.md`. The repo includes a default template (SABTC/SAETH peg-oriented); edit it to match your practice. |
-| **Not the same as cron** | The **`cronjob`** task named `heartbeat` only logs **server health** (memory, pid)—it does **not** run the model or read `HEARTBEAT.md`. |
-
-After changing `HEARTBEAT_INTERVAL_MS`, switch away from Chat and back (e.g. Wallet → Chat) so the UI picks up the new interval, or restart the app.
-
----
-
-## 6) Making swaps work (checklist)
-
-Follow these in order so swaps actually run:
-
-| Step | Where | What to do |
-|------|--------|------------|
-| 1 | **Settings → API keys** | Set **JUPITER_API_KEY** (required for Jupiter). |
-| 2 | **Settings → Solana Wallet** | Create or import a wallet; fund it with SOL. |
-| 3 | **Settings → Security tier** | Set **Tier 4** (Tier 1–3 block swap execution). |
-| 4 | **Settings → Swaps (Jupiter)** | Turn **Enable swaps** ON (otherwise you get "Swaps are disabled"). |
-| 5 | To broadcast real txs | Turn **Execution** ON and **Dry-run** OFF. Keep Dry-run ON to test without sending. |
-| 6 | Optional | Set **Max slippage (bps)** (e.g. 200 = 2%) and click **Save swap policy**. |
-
-In chat: e.g. "swap $5 SOL to USDC". The agent prepares an intent; use the **Execute** button in the swap card (or reply "confirm swap &lt;intent_id&gt;") to confirm and broadcast. If you see "Not found" on confirm, start a **New chat** (clears old intents), then ask for a fresh swap.
-
----
-
-## 6a) Clawstr on solanaagent.app
-
-The agent can **publish on solanaagent.app** in **one tool call** (`bulletin_post`)—no sidebar publish button.
-
-| Need | What to do |
-|------|------------|
-| **Fund wallet** | **Settings → Solana Wallet** — same network as **SOLANA_RPC_URL** (mainnet vs devnet). Typical cost ~**0.01 SOL** + small fee reserve per post. |
-| **Security tier** | **Not** the same as swaps: **Tier 4 is for Jupiter execution**. Clawstr posting uses **`bulletin_post`** at normal tier rules (**Tier 1** = read-only). Use **Tier 2+** if the agent says the tool is blocked by tier. |
-| **In chat** | e.g. *“Post on solanaagent: &lt;your text&gt;”* or *“Use bulletin_post with …”*. The agent should call **`bulletin_post`** with your content. |
-| **Read feeds / health** | Built-in: **`clawstr_feed`**, **`clawstr_health`**, **`clawstr_communities`**, **`bulletin_public_feed`**, **`bulletin_public_health`** (solanaagent.app public GET APIs). The agent should use the tool’s **`agent_report`** for summaries. |
-| **Sidebar** | **Clawstr** shows the **last post result** (tx + Nostr id) for the **current chat** only—it does not run the post. |
-| **Smoke test (dev)** | From repo: `npm run test:clawstr` (live payment-intent + read APIs; local `/api/help` when SQLite native loads). |
-
-**External agents** (non–Solana Agent apps) can integrate via **`POST /api/v1/bulletin/payment-intent`** and **`POST /api/v1/bulletin/post`** on **solanaagent.app** (payment-intent is **POST-only**). This app wraps that in **`bulletin_post`**.
-
-Workspace docs for the model: **`workspace/tools.md`**, **`workspace/skills/clawstr/SKILLS.md`** (also injected with workspace bootstrap on supported builds).
-
----
-
-## 6b) Swap settings reference (Settings → Swaps)
-
-| Setting | What it does |
-|--------|----------------|
-| **Enable swaps** | Must be ON to prepare any swap. Separate from Tier 4. |
-| **Execution** | ON = app may broadcast. OFF = no broadcast. |
-| **Dry-run** | ON = simulate only. OFF = live broadcast when you Execute. |
-| **Max slippage (bps)** | Cap on slippage (200 = 2%, 50 = 0.5%). |
-| **Max swap size (SOL)** | Max SOL per swap. |
-| **Max swap % of balance** | Max share of wallet SOL per swap. |
-| **Max requote deviation (bps)** | If quote moves more than this before execute, execution can be blocked. |
-| **Autopilot ON** | Agent can auto-confirm intents that pass limits. |
-| **Auto-execute ON** | Agent can auto-execute after confirm (still needs Execution ON; respects Dry-run). |
-| **Cooldown (s)** | Min seconds between executions. |
-| **Max swaps / hour, / day** | Rate limits. |
-| **Max daily SOL volume** | Daily SOL swap volume cap. |
-
----
-
-## 7) Optional: Autopilot (explicit opt‑in)
-
-Autopilot is **off by default**.
-
-In **Settings → Swaps → Autopilot**:
-
-- **Autopilot ON**: the agent can **auto-confirm** swap intents that satisfy limits
-- **Auto-execute ON**: additionally allows auto-execution (still requires Execution enabled; still respects Dry-run if enabled)
-
-Use strict limits:
-
-- Cooldown seconds
-- Max swaps/hour and swaps/day
-- Max daily SOL volume
-
-Recommendation: start with **Autopilot ON + Auto-execute OFF**, and only enable auto-execute after you’re satisfied with dry-run behavior and limits.
-
----
-
-## 8) Where your data lives (so you can back it up)
-
-The app stores chats, settings, and swap intents in **`solagent.db`**.
-
-- **Electron app** data directory (macOS):
-  - `~/Library/Application Support/solagent/`
-  - DB: `~/Library/Application Support/solagent/data/solagent.db`
-
-Back up that folder if you want to preserve your:
-
-- chat history
-- encrypted config values (API keys, wallet private key)
-- swap intent history
-
----
-
-## 9) If something looks wrong
-
-- **"Swaps are disabled"**: Turn **Enable swaps** ON in Settings → Swaps (separate from Tier 4).
-- **Swaps not working**: Confirm **JUPITER_API_KEY** in Settings and **Tier 4** in Security tier.
-- **"Not found" when confirming**: Old intent expired or cleared. Start a **New chat**, then ask for a new swap.
-- **Execution blocked**: Check **Execution** ON, **Dry-run** OFF, and cooldown/rate limits in Settings → Swaps.
-- **Fee too high**: In Settings → Swaps, max tx fee is enforced; increase if your RPC/fees are higher.
-- **Token icons missing**: Ensure you’re on the latest build; the app fetches token logos via a local `/api/logos` proxy.
-
----
-
-## 10) Factual execution reporting
-
-- The app treats tool output as source of truth; if a tool step fails, the workflow stops at that step.
-- "No result, no progress": the assistant should not continue to confirm/execute/post after a failed prepare/transfer/confirm.
-- Dry-run/simulated results are explicitly simulation only (no live on-chain transaction).
-- For any claimed success, require full proof fields: full `payment_intent_id`, full `tx_signature`, full `nostr_event_id` (no truncated placeholders).
-
+- **Sidebar → Reload** refreshes the **browser page** only.
+- To **stop** the API server, go to the terminal where **`node server.js`** is running and press **Ctrl+C**. Start again with `./build-and-run.sh` or `node server.js`.

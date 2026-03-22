@@ -14,7 +14,7 @@ body {
   height: 100%;
 }
 
-/* Thinking indicator (same as dllm) */
+/* Thinking indicator */
 .thinking-indicator {
   display: flex;
   align-items: center;

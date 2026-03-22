@@ -11,7 +11,6 @@ dist-renderer/
 .env.*.local
 
 # Data and runtime (agent DB, sessions, uploaded files)
-dllm.db
 data/solagent.db
 workspace/doc.db
 data/solagent.db-journal
@@ -20,6 +19,8 @@ data/files/
 data/sessions/
 data/memory/
 data/test-in-process/
+# Ephemeral DB + key created by scripts/run-approved-swap.js (never commit)
+data/approved-swap/
 
 # Keep data directory structure (optional placeholder)
 !data/.gitkeep

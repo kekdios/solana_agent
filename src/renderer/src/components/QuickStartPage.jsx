@@ -7,13 +7,17 @@ import { useChatStore } from "../store/chatStore";
 export default function QuickStartPage() {
   const setView = useChatStore((s) => s.setView);
   const md = useMemo(
-    () => `## Quick start (agent owners)
+    () => `## Quick start (agent owners) — V3
 
-This page is for **owners/operators** of the Solana Agent desktop app (not developers).
+This page is for **owners/operators** of **Solana Agent V3** (not developers).
+
+### Chat and workspace (V3)
+- Ask file/workspace questions in **this app’s Chat** (connected to your \`node server.js\`). External assistants don’t have your \`workspace_read\` / wallet tools.
+- The server **always** attaches **function tools** to each chat request. For a clear “content of **heartbeat.md**” question, the server may **read the file from disk** first—see root **README.md**.
 
 ### Start the app
-- **From source**: \`cd agent && npm install && npm run electron\`
-- **Packaged app**: open the \`.app\` normally.
+- **Build UI + server + browser**: \`./build-and-run.sh\` (from the project folder)
+- **Or**: \`npm run build:renderer && node server.js\` then open **http://127.0.0.1:3333** (port may differ if set in Settings).
 
 ### Open Settings and set your keys
 - **Chat**: NanoGPT / Inception / Venice — set the key for your chosen provider.
@@ -36,10 +40,9 @@ In **Settings → Security tier**: **Tier 4** is required for swap execution. Ti
 In chat, say e.g. "swap $5 SOL to USDC". Use the **Execute** button in the swap card (or reply "confirm swap &lt;intent_id&gt;") to run the swap. If you see "Not found", start a **New chat** and try again.
 
 ### Clawstr (solanaagent.app)
-- The agent can post on solanaagent.app: one tool call pays from the app wallet and publishes (balance check built in). **Tier 4 is for swaps**, not Clawstr posting (Tier 1 stays read-only).
-- Fund the app wallet on the **same network** as your RPC (~0.01 SOL + fees per post typical).
+- The agent posts via **\`bulletin_post\`** using the **free \`agent_code\`** API — set **\`CLAWSTR_AGENT_CODE\`** in **Settings → Clawstr agent code** (or \`.env\` + \`./run.sh\` for dev). **No SOL** in that tool path. **Tier 4 is for swaps**, not Clawstr posting (Tier 1 stays read-only).
 - The sidebar **Clawstr** panel shows the **last post result** for this chat only.
-- Dev smoke test from repo: \`npm run test:clawstr\`.
+- Dev smoke tests: \`npm run test:clawstr\`, \`npm run test:clawstr-agent-post\`.
 
 ### Swap settings reference (Settings → Swaps)
 | Setting | What it does |
@@ -56,10 +59,11 @@ In chat, say e.g. "swap $5 SOL to USDC". Use the **Execute** button in the swap 
 In **Settings → Swaps → Autopilot**: turn ON to let the agent auto-confirm intents that pass limits. Use **Auto-execute OFF** until you’re comfortable. Save autopilot limits (cooldown, max/hour, max/day, max daily SOL).
 
 ### Where your data lives (backup)
-- **macOS**: \`~/Library/Application Support/solagent/\`
-- DB: \`solagent/data/solagent.db\`
+- **This project (Node + browser):** from the repo root, back up **\`data/\`** — contains **\`solagent.db\`**, **\`.encryption-key\`**, **\`sessions/\`**, and other runtime files.
+- **Workspace files:** **\`workspace/\`** (persona, **\`AGENTS.md\`**, skills, memory) — or whatever **\`WORKSPACE_DIR\`** points to in Settings → Environment.
+- **Legacy:** If you ever used the old Mac desktop app, a copy may still exist under **\`~/Library/Application Support/solagent/\`** — not used once you run from the repo **\`data/\`** copy.
 
-Back up that folder to preserve chat history and encrypted config.`,
+Back up **\`data/\`** + **\`workspace/\`** to preserve config, chats, and files.`,
     []
   );
 
@@ -78,7 +82,7 @@ Back up that folder to preserve chat history and encrypted config.`,
             </svg>
             Back
           </button>
-          <h1 className="text-xl font-semibold text-slate-200">Quick start</h1>
+          <h1 className="text-xl font-semibold text-slate-200">Quick start · V3</h1>
         </div>
 
         <div className="rounded-2xl border border-[#1e1e24] bg-[#121214] p-5">

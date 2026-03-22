@@ -1,15 +1,17 @@
 # Solana Agent — Documentation
 
+**App release: V3** (`package.json` **3.0.0**; sidebar shows **V3** + semver + date). Stack: **Node `server.js`** + **React UI** (`dist-renderer/`) + **SQLite** `data/solagent.db`.
+
 | Document | Description |
 |----------|-------------|
-| **SELF_CONTAINED_AGENT_APP_PLAN.md** | Architecture and rollout plan for the Mac Electron app: in-process server, Solana wallet in config, single codebase. |
-| **VENICE_API.md** | Venice API reference for the Venice chat provider option (auth, endpoints, usage). |
-| **WORKSPACE_FILE_HANDLING.md** | Technical description of workspace file handling in `tools/workspace.js` (security, path sanitization, exec sandbox). |
-| **agent-prediction-arena-plan.md** | Plan for an agent-vs-agent prediction arena (paired matches, no AMM; out of scope for the desktop app). |
-| **QUICK_START.md** | Owner/operator quick start: keys, wallet, tiers, swaps, autopilot, and backups. |
-| **JUPITER_SWAPPING_PLAN.md** | Sovereign Jupiter swapping (implemented): intent binding, simulation enforcement, program allowlist, Tier 4 gating, and optional autopilot. |
-| **SA_AGENT_TOKENS.md** | Native agent SPL send (**`solana_agent_token_send`**), canonical mints for **`solana_token_balance`**, **`treasury_pool_info`** / **`treasury_pool_swap`**, **`hyperliquid_price`** (BTC/ETH perp mids), optional overrides, Wallet panel. |
-| **TREASURY_POOL_TRADING.md** | SABTC/SAETH/SAUSD Whirlpool pools: **Orca SDK only** (no Jupiter for these pairs), agent tool **`treasury_pool_swap`**, pool addresses, **`npm run verify:treasury-trade-path`**. Live swaps are recorded in **`swap_intents`** for the Wallet **Agent** badge (same as Jupiter executes). |
-| **Heartbeat** | **`HEARTBEAT.md`** in **`workspace/`** (optional checklist for chat heartbeats). Set **`HEARTBEAT_INTERVAL_MS`** in Settings → Environment. See root **README.md**, **TOOLS.md** §`heartbeat` / §`cronjob`, and **QUICK_START.md** §5a. Cron task `heartbeat` ≠ model checklist. |
+| **PATHS.md** | Canonical paths: `data/solagent.db`, `workspace/`, `dist-renderer/`, env overrides, approved-swap test dir, legacy Application Support. |
+| **MIGRATION_SINGLE_ROOT_WEBAPP.md** / **MIGRATION_STAGES.md** | Moving from desktop `userData` to repo-root `data/` + browser; staged checks. |
+| **VENICE_API.md** | Venice chat provider (auth, endpoints, tools body, `venice_parameters`). |
+| **WORKSPACE_FILE_HANDLING.md** | `tools/workspace.js`: security, path rules, symlink/size limits, server integration + HEARTBEAT read shortcut. |
+| **QUICK_START.md** | Owner/operator quick start: keys, wallet, tiers, swaps, backups, V3 chat notes. |
+| **SA_AGENT_TOKENS.md** | Native agent SPL send, canonical mints, treasury pool tools, Hyperliquid mids. |
+| **TREASURY_POOL_TRADING.md** | SABTC/SAETH/SAUSD Whirlpool, `treasury_pool_swap`, `HEARTBEAT.md` peg checklist notes. |
+| **agent-prediction-arena-plan.md** | Future design notes (agent-vs-agent arena; not shipped). |
+| **Heartbeat** | **`workspace/HEARTBEAT.md`** + **`HEARTBEAT_INTERVAL_MS`**. Cron **`heartbeat`** task ≠ model checklist. Server may return HEARTBEAT file content directly for explicit “content of heartbeat.md” questions—see root **README.md** (Chat V3). |
 
-The main project README is in the repository root. A dedicated website for Solana Agent is at **https://solanaagent.app**.
+The main project README is in the repository root. Product site: **https://solanaagent.app**.

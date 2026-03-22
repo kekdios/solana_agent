@@ -1,5 +1,7 @@
 # Solana Agent Skills
 
+**V3:** In-app chat always includes the full function-tool list from the server—never claim you lack wallet or workspace tools here.
+
 When to use Solana tools and strategies. **You have these tools—use them when the user's request fits.** See TOOLS.md for full parameter and output specs.
 
 ## Native agent tokens (SABTC / SAETH / SAUSD)
@@ -11,13 +13,17 @@ When summarizing **diagnostics**, copy **`mint`**, **`built_in_mint`**, and **`m
 | **`solana_token_balance`** | When the user asks how much SABTC, SAETH, SAUSD, or **agent dollars** they have. Pass **`token_symbol`** only (`SABTC`, `SAETH`, or `SAUSD`)—server resolves mint; do not paste mints for these three. |
 | **`solana_agent_token_send`** | When the user clearly wants to **send** one of those symbols (**Tier 4**). `token_symbol`, `to`, `amount_ui` or `amount`. |
 | **`treasury_pool_info`** | **Read-only** pool snapshot (vault balances, spot price as token B per 1 token A, tick, liquidity, fees)—same logic as **solanaagent.app** `/api/orca/pool/…` (Orca API, else RPC decode). `pair`: `SABTC_SAUSD` (default) or `SAETH_SAUSD`, or `pool_address`. Optional `orca_proxy_base_url` to hit the site proxy first. For **market-making / monitoring**; not an executable quote—use **`treasury_pool_swap`** + **`dry_run:true`** to simulate a size. |
-| **`treasury_pool_swap`** | When the user wants to **trade** SABTC/SAETH against SAUSD in the **native Whirlpool** (not Jupiter). `input_token_symbol`, `output_token_symbol`, `amount` or `amount_ui`. Use **`dry_run:true`** first if unsure. **Tier 4**; Swaps settings must allow execution for a real tx. |
+| **`treasury_pool_swap`** | When the user wants to **trade** SABTC/SAETH against SAUSD in the **native Whirlpool** (not Jupiter). `input_token_symbol`, `output_token_symbol`, `amount` or `amount_ui`. Use **`dry_run:true`** first if unsure. **Tier 4**. **Not** gated by Settings → Swaps **`SWAPS_EXECUTION_ENABLED`** / **`SWAPS_ENABLED`** (those are **Jupiter** only). Real tool results include **`_treasury_swap_server`**. |
 
 Canonical mints are **built in** for send/swap; for balance use **`token_symbol`** for the three native tokens. Use **`solana_transfer_spl`** only for **other** SPL mints (e.g. USDC).
 
 ## Important: wallet is built in
 
 **Do NOT ask the user for their wallet address or a file location** (e.g. wallet_address.txt). There is **no** `account_balance` tool—use **`solana_balance`** and **`solana_token_balance`** only. The app wallet is already configured (Settings / encrypted config). For balance checks, capital, top-up, SOL, USDC, or "check my wallet"—call the tools **immediately** and report; never say you need an address first.
+
+### `solana_balance` rows (no invented tickers)
+
+Each SPL row has **mint**, **decimals**, **uiAmount**. When the server adds **token_symbol**, copy that label only for that row (e.g. **USDC**, **USDT**, **SABTC**, **SAETH**, **SAUSD**). **Never** put the same uiAmount on two different mints—**decimals + mint** identify the asset (e.g. **8.9** with **8** decimals on **`2kR1…`** is **SABTC**, not USDC). If **token_symbol** is absent, report **mint + decimals + uiAmount** only. Do not invent portfolio USD totals.
 
 ## Configuration
 
@@ -40,7 +46,7 @@ Canonical mints are **built in** for send/swap; for balance use **`token_symbol`
 | Send SPL token (e.g. USDC by mint) | `solana_transfer_spl` (mint, to, amount in smallest units) |
 | Send **SABTC / SAETH / SAUSD** (native symbols; built-in mints) | **`solana_agent_token_send`** (`token_symbol`, `to`, `amount` or `amount_ui`) — **Tier 4**; fee cap 0.001 SOL |
 | **Pool state** (treasury Whirlpool: reserves, spot price, tick, fees) | **`treasury_pool_info`** — read-only; then **`treasury_pool_swap`** + `dry_run` to validate a trade size |
-| **Swap** SABTC↔SAUSD or SAETH↔SAUSD (treasury pool) | **`treasury_pool_swap`** — Orca Whirlpool only; **Tier 4**; `dry_run` optional |
+| **Swap** SABTC↔SAUSD or SAETH↔SAUSD (treasury pool) | **`treasury_pool_swap`** — Orca Whirlpool only; **Tier 4**; `dry_run` optional; no Jupiter execution toggle |
 | "Recent transactions" / "Tx history" | `solana_tx_history` |
 | "Did this tx confirm?" / "Status of signature …" | `solana_tx_status` |
 

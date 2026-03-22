@@ -11,10 +11,12 @@ export default function Settings({ onClose }) {
   const [veniceKeyInput, setVeniceKeyInput] = useState("");
   const [nanogptKeyInput, setNanogptKeyInput] = useState("");
   const [jupiterKeyInput, setJupiterKeyInput] = useState("");
+  const [clawstrAgentCodeInput, setClawstrAgentCodeInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [savingVenice, setSavingVenice] = useState(false);
   const [savingNanogpt, setSavingNanogpt] = useState(false);
   const [savingJupiter, setSavingJupiter] = useState(false);
+  const [savingClawstrAgent, setSavingClawstrAgent] = useState(false);
   const [message, setMessage] = useState(null);
 
   const [walletEnsuring, setWalletEnsuring] = useState(false);
@@ -226,6 +228,43 @@ export default function Settings({ onClose }) {
       setMessage({ type: "error", text: err.message || "Request failed" });
     } finally {
       setSavingJupiter(false);
+    }
+  };
+
+  const handleSaveClawstrAgentCode = async (e) => {
+    e.preventDefault();
+    setSavingClawstrAgent(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`${apiBase}/api/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "CLAWSTR_AGENT_CODE", value: clawstrAgentCodeInput.trim() }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const v = clawstrAgentCodeInput.trim();
+        setMessage({
+          type: "success",
+          text: v
+            ? "CLAWSTR_AGENT_CODE saved to config database (encrypted). bulletin_post can use free publishing."
+            : "CLAWSTR_AGENT_CODE cleared from config database. If unset, bulletin_post may use .env when the server loads it.",
+        });
+        setConfig((c) => ({
+          ...c,
+          CLAWSTR_AGENT_CODE: {
+            status: v ? "CONFIGURED" : "NOT_CONFIGURED",
+            masked: v && v.length > 8 ? v.slice(0, 4) + "…" + v.slice(-4) : v ? "••••" : null,
+          },
+        }));
+        setClawstrAgentCodeInput("");
+      } else {
+        setMessage({ type: "error", text: data.error || "Failed to save" });
+      }
+    } catch (err) {
+      setMessage({ type: "error", text: err.message || "Request failed" });
+    } finally {
+      setSavingClawstrAgent(false);
     }
   };
 
@@ -1176,11 +1215,53 @@ export default function Settings({ onClose }) {
           </section>
 
           <section className="rounded-xl bg-[#222228] border border-[#2a2a30] p-4">
-            <span className="text-xs font-medium uppercase tracking-wider text-slate-400 block mb-3">Clawstr (solanaagent.app)</span>
-            <p className="text-sm text-slate-500">
-              Posting on <span className="text-slate-400">solanaagent.app</span> (Clawstr) is done by the agent with the <span className="text-slate-400 font-mono">bulletin_post</span> tool: payment intent, balance check (~0.01 SOL + fee reserve), transfer, and publish in one call—no extra tier lock beyond your normal security tier (Tier 1 stays read-only). The sidebar only reflects the last result from the current chat. You do{" "}
-              <span className="text-slate-400 font-medium">not</span> need a bulletin admin token—only your configured wallet and funded SOL on the same network as your RPC.
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-medium uppercase tracking-wider text-slate-400">Clawstr (solanaagent.app)</span>
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+                  config?.CLAWSTR_AGENT_CODE?.status === "CONFIGURED" ? "bg-emerald-500/20 text-emerald-400" : "bg-slate-600/30 text-slate-400"
+                }`}
+              >
+                {config?.CLAWSTR_AGENT_CODE?.status === "CONFIGURED" && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                )}
+                {config?.CLAWSTR_AGENT_CODE?.status === "CONFIGURED" ? "CODE IN DB" : "NO CODE IN DB"}
+              </span>
+            </div>
+            <p className="text-sm text-slate-500 mb-3">
+              <span className="font-mono text-slate-400">bulletin_post</span> uses the free <span className="font-mono text-slate-400">agent_code</span> API (no SOL). The value is stored encrypted in <span className="text-slate-400">solagent.db</span> under config key{" "}
+              <span className="font-mono text-slate-400">CLAWSTR_AGENT_CODE</span>. Tier 1 stays read-only; no Tier 4 for posting. The sidebar shows the last post result for this chat. For local dev from the repo you can also set{" "}
+              <span className="font-mono text-slate-400">CLAWSTR_AGENT_CODE</span> in <span className="font-mono text-slate-400">.env</span> and use <span className="font-mono text-slate-400">./run.sh</span> (DB value overrides when present).
             </p>
+            {config?.CLAWSTR_AGENT_CODE?.masked && (
+              <p className="text-sm text-slate-500 mb-3">
+                Stored value (masked): <span className="font-mono text-slate-300">{config.CLAWSTR_AGENT_CODE.masked}</span>
+              </p>
+            )}
+            <form onSubmit={handleSaveClawstrAgentCode} className="space-y-3">
+              <div>
+                <label htmlFor="clawstr-agent-code" className="text-xs text-slate-500 block mb-1">
+                  CLAWSTR_AGENT_CODE <span className="text-slate-600">(config table)</span>
+                </label>
+                <input
+                  id="clawstr-agent-code"
+                  type="password"
+                  value={clawstrAgentCodeInput}
+                  onChange={(e) => setClawstrAgentCodeInput(e.target.value)}
+                  placeholder="Paste new code to save or replace"
+                  className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50"
+                  autoComplete="off"
+                />
+                <p className="text-xs text-slate-600 mt-1">Leave blank and click Save to clear the stored code (falls back to process env if set).</p>
+              </div>
+              <button
+                type="submit"
+                disabled={savingClawstrAgent}
+                className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 py-1.5 text-sm font-medium text-white transition"
+              >
+                {savingClawstrAgent ? "Saving…" : "Save to config database"}
+              </button>
+            </form>
           </section>
 
           <section className="rounded-xl bg-[#222228] border border-[#2a2a30] p-4">

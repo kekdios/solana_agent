@@ -1,5 +1,7 @@
 # Native agent tokens (`solana_agent_token_send`)
 
+Applies to **Solana Agent V3** (same tools in `config/tools.yaml` / **TOOLS.md**).
+
 The Solana Agent is **born with**:
 
 - **`solana_agent_token_send`** — send **SABTC**, **SAETH**, or **SAUSD** by **symbol** (canonical mints built in).

@@ -552,20 +552,17 @@ export const useChatStore = create((set, get) => ({
   },
 
   restartServer: async () => {
-    const { apiBase } = get();
-    const base = apiBase || "";
     const { messages } = get();
     set({
       messages: [
         ...messages,
-        { role: "assistant", content: "Restarting server…" },
+        {
+          role: "assistant",
+          content:
+            "Reloading the page. To restart the API server, stop `node server.js` in the terminal (Ctrl+C) and start it again.",
+        },
       ],
     });
-    try {
-      await fetch(`${base}/api/restart`, { method: "POST" });
-      setTimeout(() => window.location.reload(), 2500);
-    } catch (e) {
-      set({ error: "Restart request failed: " + (e.message || e) });
-    }
+    setTimeout(() => window.location.reload(), 400);
   },
 }));

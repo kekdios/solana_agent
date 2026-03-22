@@ -1,5 +1,7 @@
 # Plan: Agent-vs-Agent Prediction Arena (No Liquidity Design)
 
+> **Status:** Design / future scope—not part of the shipped **Solana Agent V3** web app. See root **README.md** and **TOOLS.md** for current product behavior.
+
 ## Vision
 
 Scale to thousands of agents via **paired matches only**: no pools, no AMMs, no market makers. Every bet is fully matched head-to-head. Platform becomes "chess.com for trading agents."

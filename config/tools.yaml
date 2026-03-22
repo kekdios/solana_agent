@@ -10,8 +10,9 @@ tools:
     description: |
       Fetch a web page or search the web. You HAVE this tool—use it whenever the user
       asks to visit a site, check a URL, or look something up (e.g. "visit agentchainlab.com",
-      "review the MCP on that site"). Pass a full URL to fetch that page directly, or a
-      search query; DuckDuckGo is used for search, then the first result is fetched.
+      "find out more about nostr"). Pass a full URL to fetch that page directly, or any
+      search phrase: the server tries DuckDuckGo Instant Answer, then Wikipedia opensearch
+      on a simplified keyword query, then fetches the first useful page for title/snippet/excerpt.
     module: ./tools/browser.js
     handler: browse
     enabled: true
@@ -135,13 +136,13 @@ tools:
     enabled: true
 
   - name: workspace_list
-    description: List files and subdirectories in a workspace path (one level). Pass path (e.g. memory) or omit for workspace root. Use to traverse one folder at a time.
+    description: List files and subdirectories in a workspace path (one level). Pass path (e.g. memory) or omit for workspace root. **Required** for "list workspace" / ls-style questions—never invent filenames; report only tool output.
     module: ./tools/workspace.js
     handler: workspaceList
     enabled: true
 
   - name: workspace_tree
-    description: Get the full directory tree of the workspace (or a subpath) in one call. Returns a tree string and a flat list of all file paths (file_paths). Use to discover any file without hardcoding—then use workspace_read with a path from file_paths. Use workspace_tree and workspace_read for listing/reading files; use exec to run commands. Pass path (e.g. . or memory) or omit for full workspace; optional max_depth (default 20).
+    description: Full workspace directory tree in one call (tree string + file_paths). **Use first** when the user asks what's in the workspace or wants a file list—do not fabricate directories. Then workspace_read paths from file_paths. Optional path (e.g. . or memory), max_depth (default 20). For shell listings use exec instead.
     module: ./tools/workspace.js
     handler: workspaceTree
     enabled: true
@@ -168,6 +169,7 @@ tools:
   - name: solana_balance
     description: |
       Get SOL balance (and SPL token list) for the **app wallet** (already configured; no user input needed). Use when the user asks for balance, "what are your wallet balances", SOL balance, USDC, or "check my wallet". CRITICAL: There is NO account_balance tool in this app—always use solana_balance. Do NOT ask for an address or file; call this tool directly.
+      Response SPL rows include **mint**, **decimals**, **uiAmount**, and when present **token_symbol** (server-known only: e.g. USDC, USDT, SABTC, SAETH, SAUSD). **Never** assign a ticker to a row that has no token_symbol—report mint+decimals+uiAmount only. Do not invent USD totals from balances.
     module: ./tools/solana.js
     handler: solanaBalance
     enabled: true
@@ -206,7 +208,7 @@ tools:
 
   - name: treasury_pool_swap
     description: |
-      **Born-with treasury trading:** swap **SABTC↔SAUSD** or **SAETH↔SAUSD** on Orca Whirlpools (Orca SDK only—no Jupiter). Same app wallet as **solana_token_balance** / **solana_agent_token_send**. Pass **input_token_symbol**, **output_token_symbol**, **amount** or **amount_ui**. Requires **SWAPS_ENABLED**; live execution needs **SWAPS_EXECUTION_ENABLED**. Use **dry_run:true** to simulate without sending. **Tier 4.** No liquidity provision.
+      **Born-with treasury trading:** swap **SABTC↔SAUSD** or **SAETH↔SAUSD** on Orca Whirlpools (Orca SDK only—no Jupiter). Same app wallet as **solana_token_balance** / **solana_agent_token_send**. Pass **input_token_symbol**, **output_token_symbol**, **amount** or **amount_ui**. **Not** gated by Settings Jupiter toggles (**SWAPS_ENABLED** / **SWAPS_EXECUTION_ENABLED**). Use **dry_run:true** to simulate without sending. **Tier 4.** No liquidity provision.
     module: ./tools/treasury-pool-swap.js
     handler: treasuryPoolSwap
     enabled: true
@@ -299,12 +301,12 @@ tools:
 
   - name: bulletin_post
     description: |
-      Publish on solanaagent.app Clawstr: single tool call pays from the app wallet and sends content—no human sidebar step. No separate security-tier lock beyond normal tool tiers (Tier 1 read-only still cannot run this). Before sending SOL, verifies wallet balance ≥ payment (typically 0.01 SOL / 10_000_000 lamports) plus a fee reserve. Creates a payment intent if none is cached, transfers with memo, POSTs /api/v1/bulletin/post with payment_intent_id, content, and tx_signature. Returns ok true with tx_signature and nostr_event_id, or ok false with stage (balance|intent|transfer|post|validate) and error.
+      Publish on solanaagent.app Clawstr (free only): POST /api/v1/bulletin/post with CLAWSTR_AGENT_CODE + content. Requires CLAWSTR_AGENT_CODE in Settings (encrypted) or CLAWSTR_AGENT_CODE in .env when using ./run.sh. No SOL transfer. Returns ok true with nostr_event_id, mode agent_code, or ok false with stage (validate|post) and error if code missing or API rejects. Tier 1 cannot run mutating tools. For paid on-chain posting use the app sidebar flow (payment intent + approve-and-post), not this tool.
     enabled: true
 
   - name: bulletin_approve_and_post
     description: |
-      Alias of bulletin_post (same behavior). Prefer bulletin_post in new prompts.
+      Alias of bulletin_post (same free agent_code behavior). Prefer bulletin_post in new prompts.
     enabled: true
 
   - name: clawstr_health
