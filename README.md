@@ -1,10 +1,10 @@
 # Solana Agent
 
-**Release V3** — `package.json` version **3.0.0**; the web UI sidebar shows **V3** plus semver and date. Local **Node.js HTTP server** + **React** UI with Solana trading tools (balance, transfer, **native SABTC/SAETH/SAUSD** via **`solana_agent_token_send`** + canonical mints for **`solana_token_balance`**, Jupiter price/quote, Drift perps, Kamino/Raydium/Bet stubs), workspace file tools, and a **sandbox** to create and run programs (exec). Chat can use **NanoGPT** (Grok 4 Fast — default), **Inception** (mercury-2), or **Venice** (venice-uncensored). Choose the provider and set the API key in **Settings**; optional env: `NANOGPT_API_KEY`, `INCEPTION_API_KEY`, `VENICE_ADMIN_KEY`, `CHAT_BACKEND=nanogpt|inception|venice`. Wallet and DeFi tools use the app’s Solana keypair only.
+**Release V3** — `package.json` version **3.0.1**; the web UI sidebar shows **V3** plus semver and date. Local **Node.js HTTP server** + **React** UI with Solana trading tools (balance, transfer, **native SABTC/SAETH/SAUSD** via **`solana_agent_token_send`** + canonical mints for **`solana_token_balance`**, Jupiter price/quote), workspace file tools, and a **sandbox** to create and run programs (exec). Chat can use **NanoGPT** (Grok 4 Fast — default), **Inception** (mercury-2), or **Venice** (venice-uncensored). Choose the provider and set the API key in **Settings**; optional env: `NANOGPT_API_KEY`, `INCEPTION_API_KEY`, `VENICE_ADMIN_KEY`, `CHAT_BACKEND=nanogpt|inception|venice`. Wallet and DeFi tools use the app’s Solana keypair only.
 
 Run it locally with **`node server.js`** (and a browser). **`./build-and-run.sh`** builds the UI and opens the app. There are no packaged-desktop or auto-update flows in this repo anymore.
 
-A dedicated website for Solana Agent is at **https://solanaagent.app**.
+This repository runs as a local-first web app (server + renderer in this workspace).
 
 ## Prerequisites
 
@@ -19,8 +19,7 @@ A dedicated website for Solana Agent is at **https://solanaagent.app**.
    npm install
    ```
 
-2. **Configure in Settings (gear icon):** Set your **NanoGPT API key** (default chat provider), and optionally Inception/Venice keys and **JUPITER_API_KEY** for swaps. All keys are stored encrypted in the **config table** (solagent.db). Wallet and **SOLANA_RPC_URL** can be set or imported under Settings → Solana Wallet and Settings → Environment.  
-   **Settings** is the source of truth in **\`solagent.db\`**; the packaged UI does not load **\`.env\`** for that. For local scripts, **\`./run.sh\`** can source **\`.env\`** if you use it. See **TOOLS.md**.
+2. **Configure in Settings (gear icon):** Set your **NanoGPT API key** (default chat provider), and optionally Inception/Venice keys and **JUPITER_API_KEY** for swaps. Secrets/bootstrap values are maintained in **`.env`**; non-secret maintainable policy keys are stored in **`data/app-settings.json`**. Wallet and **SOLANA_RPC_URL** can be set or imported under Settings → Solana Wallet and Settings → Environment.
 
 3. Run the UI + server (builds `dist-renderer/`, starts Node, opens the browser):
 
@@ -45,16 +44,16 @@ A dedicated website for Solana Agent is at **https://solanaagent.app**.
 - **Tools on every turn:** The server **always** sends OpenAI-style **`tools`** + **`tool_choice: "auto"`** with each chat completion so the model can call `workspace_tree`, `workspace_read`, `exec`, wallet tools, etc.
 - **`HEARTBEAT.md` shortcut:** If the user clearly asks for the **content** of **`heartbeat.md`** / **`HEARTBEAT.md`**, the server **reads the file from `WORKSPACE_DIR` first** and may respond **without** calling the LLM for that turn—so the answer matches disk even if a model would skip tools. Other files still use **`workspace_read`** (or tree + read).
 
-All chats and **all configuration** are stored in a single SQLite database, **solagent.db**. The **config table** is the sole source of truth: API keys (NanoGPT, Inception, Venice, Jupiter), chat provider (CHAT_BACKEND), Solana wallet (public/private key), and env-style variables (PORT, HOST, SOLANA_RPC_URL, etc.) are set via **Settings** and stored there; API keys and wallet private keys are **encrypted**. **Note:** `DB_PATH` and `ENV_PATH` are not stored in config (they are set by the process).
+Chat history and runtime state are stored in SQLite (**`data/solagent.db`**). Configuration is split: secrets/bootstrap values in **`.env`**, and maintainable non-secret settings in **`data/app-settings.json`**.
 
 **Where is solagent.db?**  
 By default, when you run **`node server.js`** from the project root, the DB is at **`data/solagent.db`** (with **`data/.encryption-key`** next to it). Override with **`DB_PATH`** if needed. Canonical layout: **`docs/PATHS.md`**. Migration from old desktop data: **`docs/MIGRATION_SINGLE_ROOT_WEBAPP.md`**.
 
 **Token usage** is recorded in the same DB: each chat completion writes one row to `token_usage`. Query usage via `GET /api/usage?from_date=YYYY-MM-DD&to_date=YYYY-MM-DD&conversation_id=N&limit=100` (returns `rows` and `summary`).
 
-**Workspace:** The `workspace/` folder holds persona and rules the model sees on the first message of each conversation (when the server injects workspace context): **`SOUL.md`**, **`AGENTS.md`**, **`tools.md`**, **`HEARTBEAT.md`** (optional checklist when a **chat heartbeat** runs—repo ships a default peg/treasury template; edit or remove as needed), and **`skills/clawstr/SKILLS.md`** (posting on **solanaagent.app**—**out of the box** with the default workspace). Edit these to change identity, behavior, and tool reminders. The model can also CRUD files in `workspace/` via tools: `workspace_read`, `workspace_write`, `workspace_delete`, `workspace_list`, `workspace_tree` (paths relative to workspace). The **exec** tool runs shell commands in the workspace (sandbox). **Skills** (MCP-like): structured docs under `workspace/skills/*/SKILLS.md` (e.g. `skills/solana/SKILLS.md`, `skills/solana_swaps/SKILLS.md`). Tables: `conversations`, `messages` (conversation_id, role, content, created_at).
+**Workspace:** The `workspace/` folder holds persona and rules the model sees on the first message of each conversation (when the server injects workspace context): **`SOUL.md`**, **`AGENTS.md`**, **`tools.md`**, and **`HEARTBEAT.md`** (optional checklist when a **chat heartbeat** runs). Edit these to change identity, behavior, and tool reminders. The model can CRUD files in `workspace/` via `workspace_read`, `workspace_write`, `workspace_delete`, `workspace_list`, `workspace_tree`. The **exec** tool runs shell commands in the workspace sandbox.
 
-**Heartbeat checklist file:** **`HEARTBEAT.md`** lives in **`workspace/HEARTBEAT.md`** (relative to the server’s workspace root). Set **`HEARTBEAT_INTERVAL_MS`** in Settings → Environment to enable periodic heartbeat **user messages** in the Chat view (see **heartbeat** tool note below). **`cronjob` task `heartbeat`** is only a server health log—it does **not** read `HEARTBEAT.md` or call the LLM.
+**Heartbeat checklist file:** **`HEARTBEAT.md`** lives in **`workspace/HEARTBEAT.md`**. Set **`HEARTBEAT_INTERVAL_SECONDS`** in Settings → Environment to enable periodic heartbeat **user messages** in the Chat view. **`cronjob` task `heartbeat`** is only a server health log—it does not read `HEARTBEAT.md` or call the LLM.
 
 **Confirming agent-created memory files:** When the agent says it wrote to `memory/YYYY-MM-DD.md` or `MEMORY.md`, that path is **inside the workspace** (default: **`workspace/`** under the project root, or **`WORKSPACE_DIR`** if set). If the file is missing, the agent may have described the write without actually calling `workspace_write`; ask it to write the path again and check.
 
@@ -63,11 +62,10 @@ By default, when you run **`node server.js`** from the project root, the DB is a
 - `npm run test:server-start` — spawns `server.js` on a test port and checks `/api/help`.
 - `npm run test:browse` — smoke-test **`browse`** (DDG + Wikipedia fallback; needs network).
 - `npm run test:in-process-server` — starts the server in-process and checks `/api/help` (uses a temp data dir, then removes it).
-- `npm run test:clawstr` — smoke test: live `POST …/bulletin/payment-intent`, GET Clawstr/bulletin read APIs on solanaagent.app, and (when SQLite native loads) local `/api/help` includes bulletin + read tools (see `scripts/test-clawstr-e2e.js`).
 - `node scripts/test-solana-tools.js` — runs Solana tool handlers (requires wallet in config or, for testing only, `SOLANA_PRIVATE_KEY` in .env; transfer test sends 0.001 SOL to a test address).
 - `npm run test:agent-token-send` — live **`solana_agent_token_send`** smoke test (uses **`TEST_PRIV_KEY`** from repo `.env` if set). See **`docs/SA_AGENT_TOKENS.md`**.
 
-**Settings (gear icon):** Choose **Chat provider** (NanoGPT default, Inception, or Venice) and set **NanoGPT API key**, **Inception API key**, and/or **Venice API key** (stored encrypted). Manage **Solana wallet** (view/copy public key, reveal private key, generate wallet, passphrase backup). **Environment** — set PORT, HOST, SOLANA_RPC_URL, etc. in the config table (PORT/HOST apply after restart). **Clear all conversation history** — removes all chats, messages, token usage, and saved sessions; confirm before running.
+**Settings (gear icon):** Choose **Chat provider** (NanoGPT default, Inception, or Venice) and set keys. Manage **Solana wallet** (view/copy public key, reveal private key, generate wallet, passphrase backup). **Environment** writes bootstrap values to `.env` (PORT/HOST apply after restart). Policy settings persist in `data/app-settings.json`.
 
 **Making swaps work (checklist):**
 
@@ -81,7 +79,9 @@ By default, when you run **`node server.js`** from the project root, the DB is a
 
 In chat: ask e.g. "swap $5 SOL to USDC". The agent will prepare an intent; use the **Execute** button in the swap card (or reply "confirm swap &lt;intent_id&gt;") to confirm and broadcast. If you see "Not found" on confirm, start a **New chat** so old intents are cleared, then ask for a fresh swap.
 
-**Clawstr (solanaagent.app):** The agent’s **`bulletin_post`** tool uses **only** the free **`agent_code`** path (`POST /api/v1/bulletin/post`); you must set **`CLAWSTR_AGENT_CODE`** in Settings (*Clawstr agent code*) or in `.env` with **`./run.sh`**. There is no SOL payment in that tool path. The UI sidebar can still use the separate **paid** approve-and-post HTTP flow if needed. **Read-only** APIs: **`clawstr_health`**, **`clawstr_feed`**, **`clawstr_communities`**, **`bulletin_public_feed`**, **`bulletin_public_health`**. **Tier 4 is for swaps**, not Clawstr posting (Tier 1 stays read-only). Smoke tests: `npm run test:clawstr`, `npm run test:clawstr-agent-post`.
+**Direct Nostr mode:** The agent uses unified **`nostr_action`** and connects to relays directly. Use `type:"publish"` with `payload.content` (requires **`NOSTR_NSEC`** in env for signing), and `type:"read"` with scoped payload (`feed|public_feed|communities|health|public_health`). `reply` / `react` / `profile` are supported. Tier note: **Tier 4 is for swaps**, not Nostr posting (Tier 1 remains read-only for mutating actions).
+
+**Nostr identity env vars:** Use `NOSTR_NSEC` (required for write/sign), optional `NOSTR_NPUB` (display/reporting), and optional `NOSTR_RELAYS` (comma-separated relay list). Keep secret keys private and never print them in logs or chat output.
 
 **Execution reporting guarantees (anti-fabrication):**
 - The server is the source of truth for tool results; the assistant can only report returned tool payloads.
@@ -118,7 +118,7 @@ The chat uses **OpenAI-compatible tool/function calling** (NanoGPT, Inception, o
 - **file_list** – List saved files.
 - **generate_image** – Generate an image from a text prompt. Set `IMAGE_API_URL` and `IMAGE_API_KEY` in Settings (or .env for local testing) to enable (e.g. OpenAI-compatible image endpoint).
 - **analyze_image** – Describe or OCR an uploaded image. Set `VISION_API_URL` and `VISION_API_KEY` in Settings (or .env for local testing). Optional: `VISION_MODEL` (default `gpt-4o-mini`).
-- **heartbeat** – Returns a health-check payload (timestamp, status, memory, pid). Optional: set `HEARTBEAT_INTERVAL_MS` in Settings → Environment (or .env for testing). When set, the **server** logs a lightweight heap heartbeat on that interval; the **Chat** UI can inject the default heartbeat user prompt on the same interval so the agent runs **`HEARTBEAT.md`** checks in the open conversation (min 10s between ticks). Leave empty to disable.
+- **heartbeat** – Returns a health-check payload (timestamp, status, memory, pid). Optional: set `HEARTBEAT_INTERVAL_SECONDS` in Settings → Environment. When set, the server logs a lightweight heap heartbeat on that interval; the Chat UI can inject the default heartbeat user prompt on the same interval.
 - **cronjob** – Schedule a recurring task with a cron expression. Tasks: `log`, **`heartbeat`** (server health payload only—**not** LLM / **not** `HEARTBEAT.md`), **`check_btc`** (Bitcoin price check; writes an alert to `data/memory/alerts.md` when price drops below threshold). Example: `0 * * * *` = every hour; `*/5 * * * *` = every 5 minutes. Set `BTC_ALERT_BELOW=65000` in .env (testing only) to change the alert threshold (default 65k).
 - **get_btc_price** – Get current Bitcoin price in USD (CoinGecko). Use with **cronjob** task `check_btc` to “check every hour and alert if below $65k”; view alerts via `GET /api/alerts` or `data/memory/alerts.md`.
 - **conversation_search** – Search past conversations by text (long-term memory). Returns conversation_id, excerpt, date; use when the user asks what you discussed or to find past chats about a topic. See **TOOLS.md**.
@@ -132,7 +132,7 @@ Files are stored under `data/files/`. Uploaded images can be analysed with **ana
 **Database schema and migrations**  
 All schema and migrations live in **`db.js`**:
 
-- **Initial schema:** The first `db.exec(\`...\`)` block in `db.js` creates the core tables if they don’t exist: **conversations**, **messages**, **token_usage**, **config**. That’s where new tables (e.g. the config table) and base columns are defined.
+- **Initial schema:** The first `db.exec(\`...\`)` block in `db.js` creates the core tables if they don’t exist: **conversations**, **messages**, **token_usage** (and other runtime tables).  
 - **Migrations:** Later in `db.js`, conditional blocks use **`hasColumn(table, column)`** and then run **`db.exec(...)`** with **`ALTER TABLE`** to add new columns or indexes (e.g. `server_id`, `server_ts`, `status`, `is_deleted` on `messages`). When you add a new table or column, add it either to the initial `CREATE TABLE IF NOT EXISTS` block (for new tables) or in a new `if (!hasColumn(...)) { db.exec(...) }` block (for new columns on existing tables).
 - **Usage:** `server.js` and other modules only call `db.js` (e.g. `db.getConfig`, `db.setConfig`, `db.createConversation`, `db.insertMessage`). They never run raw DDL; all schema changes are made in **`db.js`** only.
 
@@ -163,4 +163,3 @@ Auth is via the corresponding API key (Bearer or header as required by each prov
 If you want to get set up quickly (keys, wallet, tiers, swaps, autopilot), see:
 
 - `docs/QUICK_START.md`
-- **Clawstr / solanaagent.app:** README section **Clawstr** above and `workspace/skills/clawstr/SKILLS.md`

@@ -51,7 +51,7 @@ In this codebase, **`loadConfigKey()` reads the `config` table in `solagent.db` 
 - `PORT` / `HOST` — how the HTTP server binds.
 - `WORKSPACE_DIR` / `DATA_DIR` — if you want explicit single-root paths.
 
-Those env vars are **host-level**, not a replacement for the encrypted config table.
+Those env vars are **host-level** and part of the current settings model (`.env` + `data/app-settings.json`).
 
 ---
 

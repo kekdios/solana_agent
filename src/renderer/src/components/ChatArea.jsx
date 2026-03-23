@@ -303,7 +303,7 @@ export default function ChatArea() {
   }, [messages]);
 
   /**
-   * When Settings → HEARTBEAT_INTERVAL_MS is set, periodically POST the default heartbeat
+   * When Settings → HEARTBEAT_INTERVAL_SECONDS is set, periodically POST the default heartbeat
    * user prompt so the agent runs HEARTBEAT.md checks in this conversation (while Chat is open).
    * Server-side startHeartbeat still only logs memory to the console.
    * (V3: explicit “content of heartbeat.md” user messages are answered from disk in server.js before the LLM.)
@@ -320,8 +320,9 @@ export default function ChatArea() {
         const res = await fetch(`${base}/api/config`);
         const data = await res.json();
         if (cancelled) return;
-        const raw = data?.config?.env?.HEARTBEAT_INTERVAL_MS;
-        const ms = Number(raw);
+        const raw = data?.config?.env?.HEARTBEAT_INTERVAL_SECONDS ?? data?.config?.env?.HEARTBEAT_INTERVAL_MS;
+        const sec = Number(raw);
+        const ms = sec * 1000;
         if (!Number.isFinite(ms) || ms <= 0) return;
 
         const safeMs = Math.max(ms, 10_000);

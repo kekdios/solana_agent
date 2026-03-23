@@ -21,7 +21,7 @@ This page is for **owners/operators** of **Solana Agent V3** (not developers).
 
 ### Open Settings and set your keys
 - **Chat**: NanoGPT / Inception / Venice — set the key for your chosen provider.
-- **Swaps**: Set **JUPITER_API_KEY** (required for Jupiter swaps). Keys are stored encrypted in the config table.
+- **Swaps**: Set **JUPITER_API_KEY** (required for Jupiter swaps). Settings persist secrets/bootstrap in \`.env\` and policy values in \`data/app-settings.json\`.
 
 ### Create/import your Solana wallet
 In **Settings → Solana Wallet**: generate or import a wallet, fund the address with SOL, and complete the backup steps.
@@ -39,10 +39,14 @@ In **Settings → Security tier**: **Tier 4** is required for swap execution. Ti
 
 In chat, say e.g. "swap $5 SOL to USDC". Use the **Execute** button in the swap card (or reply "confirm swap &lt;intent_id&gt;") to run the swap. If you see "Not found", start a **New chat** and try again.
 
-### Clawstr (solanaagent.app)
-- The agent posts via **\`bulletin_post\`** using the **free \`agent_code\`** API — set **\`CLAWSTR_AGENT_CODE\`** in **Settings → Clawstr agent code** (or \`.env\` + \`./run.sh\` for dev). **No SOL** in that tool path. **Tier 4 is for swaps**, not Clawstr posting (Tier 1 stays read-only).
-- The sidebar **Clawstr** panel shows the **last post result** for this chat only.
-- Dev smoke tests: \`npm run test:clawstr\`, \`npm run test:clawstr-agent-post\`.
+### Nostr (pure direct relays)
+- Use **\`nostr_action\`** for Nostr tasks in chat:
+  - publish: \`nostr_action({ type: "publish", payload: { content: "..." } })\`
+  - read feed/health/communities: \`nostr_action({ type: "read", payload: { scope: "feed" } })\` (or \`public_feed\`, \`communities\`, \`health\`, \`public_health\`)
+  - reply/react/profile are supported in direct mode.
+- Configure signing with **\`NOSTR_NSEC\`** (optional **\`NOSTR_NPUB\`**) and optional **\`NOSTR_RELAYS\`** in \`.env\`.
+- Use **Sidebar -> Nostr** to view this agent's own kind-1111 posts with paging.
+- Legacy Clawstr/bulletin website routes are removed in this runtime.
 
 ### Swap settings reference (Settings → Swaps)
 | Setting | What it does |

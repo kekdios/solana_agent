@@ -3,9 +3,9 @@
 > Single source of truth for built-in tools the assistant can invoke.  
 > Keep this file up to date when you add, rename, or remove a tool.
 
-**The agent can and should use any of these tools and strategies when they fit the user's request.** Do not say you cannot do something if a tool exists for it. Use the right tool for the task: wallet ops, swaps, **Clawstr on solanaagent.app (`bulletin_post`)**, perps, lending, prediction markets, docs, workspace, sandbox (exec), or memory. When in doubt, call the tool and reason from the result.
+**The agent can and should use any of these tools and strategies when they fit the user's request.** Do not say you cannot do something if a tool exists for it. Use the right tool for the task: wallet ops, swaps, **Nostr via `nostr_action`** (single gateway), docs, workspace, sandbox (exec), or memory. When in doubt, call the tool and reason from the result.
 
-**Default workspace bootstrap** (first-turn system context when the server loads `workspace/`): `SOUL.md`, `AGENTS.md`, `workspace/tools.md`, and `workspace/skills/clawstr/SKILLS.md`—posting and reads for solanaagent.app are documented **out of the box** without requiring `workspace_read` first.
+**Default workspace bootstrap** (first-turn system context when the server loads `workspace/`): `SOUL.md`, `AGENTS.md`, and `workspace/tools.md`.
 
 ## Truth contract (runtime)
 
@@ -17,6 +17,7 @@
 
 ### Solana Agent V3 — `POST /api/chat` behavior
 
+- **Nostr simplification:** The model should use **`nostr_action`** as the single Nostr gateway.
 - **Tools on every request:** The server **always** includes the enabled tool definitions and `tool_choice: "auto"` (OpenAI-compatible) for each completion round—no keyword gating.
 - **In-app only:** Answers that require **`workspace_*`** or wallet tools only apply when the user chats through **this app** hitting your server. Other UIs (e.g. generic IDE chat) are not wired to `server.js`.
 - **`HEARTBEAT.md` shortcut:** When the last user message clearly asks for the **content** of `heartbeat.md` / `HEARTBEAT.md`, **`server.js` may read the file from `WORKSPACE_DIR`** and return it **without** calling the LLM for that turn (deterministic; avoids models skipping `workspace_read`). Other paths still use **`workspace_tree`** / **`workspace_read`**.
@@ -29,15 +30,11 @@
 | -------------------------- | ---------------- |
 | **Wallet** – address, balance, send SOL/SPL, **native SABTC/SAETH/SAUSD** (balances **`solana_token_balance`** + **`token_symbol`**; send **`solana_agent_token_send`**; **treasury pool read** **`treasury_pool_info`**; **treasury swap** **`treasury_pool_swap`** Orca-only — see **`docs/TREASURY_POOL_TRADING.md`**), tx history/status (wallet **built in**). | `solana_address`, `solana_balance`, `solana_transfer`, `solana_token_balance`, `solana_transfer_spl`, `solana_agent_token_send`, **`treasury_pool_info`**, **`treasury_pool_swap`**, `solana_tx_history`, `solana_tx_status`, `solana_network` |
 | **Swaps / prices** – SOL or token price, swap quote (no execution); Hyperliquid perp mids (BTC/ETH default) | `jupiter_price`, `jupiter_quote`, **`hyperliquid_price`** |
-| **Perps** – Drift perp price, positions, place order | `drift_perp_price`, `drift_positions`, `drift_place_order` |
-| **Lending** – Kamino health, positions, deposit | `kamino_health`, `kamino_positions`, `kamino_deposit` |
-| **AMM / memecoins** – Raydium quote, pump.fun→Raydium | `raydium_quote`, `raydium_market_detect` |
-| **Prediction markets** – Drift BET markets and positions | `bet_markets`, `bet_positions` |
 | **Docs** – crawl, index, search, read folder | `doc_crawl`, `doc_index`, `doc_search`, `read_docs_folder`, `workspace_read` |
 | **Workspace** – discover and read/write/delete; no hardcoded paths | `workspace_tree` (full tree + file_paths), `workspace_list` (one level), `workspace_read`, `workspace_write`, `workspace_delete` |
 | **Sandbox / exec** – run shell commands in the workspace (create programs with workspace_write, then run them) | `exec` |
 | **Memory** – past conversations | `conversation_search` |
-| **Clawstr (solanaagent.app)** – post via **`bulletin_post`** (free **`agent_code`**; set **`CLAWSTR_AGENT_CODE`**). Read-only: **`clawstr_health`**, **`clawstr_feed`**, **`clawstr_communities`**, **`bulletin_public_feed`**, **`bulletin_public_health`**. Supporting: `bulletin_create_payment_intent`, `bulletin_get_latest_intent` (sidebar / paid path); `bulletin_approve_and_post` = alias of **`bulletin_post`**. Payment-intent URL is **POST-only** (GET → 404). | `bulletin_post`, `bulletin_create_payment_intent`, `bulletin_get_latest_intent`, `bulletin_approve_and_post`, `clawstr_health`, `clawstr_feed`, `clawstr_communities`, `bulletin_public_feed`, `bulletin_public_health` |
+| **Nostr gateway** – single entrypoint with strict action contracts. Publish/read/reply/react/profile via `type` + `payload`. | `nostr_action` |
 | **Web / API** – browse, fetch URL | `browse`, `fetch_url` |
 
 ---
@@ -78,23 +75,13 @@
 | **Solana**  | `solana_token_balance` | SPL token balance for a mint (mint; optional owner).      | `solana_token_balance({ mint: "…" })` |
 | **Solana**  | `solana_transfer_spl`  | Send SPL tokens (mint, to, amount in smallest units).      | `solana_transfer_spl({ mint: "…", to: "…", amount: "1000000" })` |
 | **Solana**  | `solana_agent_token_send` | **Native:** send **SABTC / SAETH / SAUSD** by symbol (born with canonical mints). Optional Settings overrides. Rejects if estimated network fee &gt; 0.001 SOL. **Tier 4.** | `solana_agent_token_send({ token_symbol: "SAUSD", to: "…", amount_ui: 100 })` |
-| **Solana**  | `treasury_pool_info` | **Read-only:** Whirlpool snapshot (Orca API → RPC fallback, same as solanaagent.app). **`pair`** `SABTC_SAUSD` / `SAETH_SAUSD` or **`pool_address`**. Optional **`orca_proxy_base_url`**. Not a trade quote. | `treasury_pool_info({ pair: "SABTC_SAUSD" })` |
+| **Solana**  | `treasury_pool_info` | **Read-only:** Whirlpool snapshot (Orca API → RPC fallback). **`pair`** `SABTC_SAUSD` / `SAETH_SAUSD` or **`pool_address`**. Optional **`orca_proxy_base_url`**. Not a trade quote. | `treasury_pool_info({ pair: "SABTC_SAUSD" })` |
 | **Solana**  | `treasury_pool_swap` | **Native:** swap **SABTC↔SAUSD** or **SAETH↔SAUSD** on Orca Whirlpool (SDK only). **`dry_run:true`** simulates. Live needs Swaps + execution enabled. **Tier 4.** | `treasury_pool_swap({ input_token_symbol: "SAUSD", output_token_symbol: "SABTC", amount: "1000000", dry_run: true })` |
 | **Solana**  | `solana_tx_history`   | Recent tx signatures for the app wallet (optional limit).   | `solana_tx_history({ limit: 20 })` |
 | **Solana**  | `solana_tx_status`   | Transaction status by signature.                             | `solana_tx_status({ signature: "…" })` |
 | **Jupiter** | `jupiter_price`      | SOL or token USD price (and optional 24h change).             | `jupiter_price({})` or `jupiter_price({ ids: "SOL" })` |
 | **Hyperliquid** | `hyperliquid_price` | Perp **mid** prices USD via public `info` **allMids** (default **BTC**, **ETH**). Optional **`coins`**. Not on-chain execution. | `hyperliquid_price({})` or `hyperliquid_price({ coins: ["BTC", "ETH", "SOL"] })` |
 | **Jupiter** | `jupiter_quote`      | Swap quote (no execution): input/output mint, amount.         | `jupiter_quote({ input_mint: "…", output_mint: "…", amount: "…" })` |
-| **Drift**   | `drift_perp_price`   | SOL-PERP mark price (USD).                                   | `drift_perp_price({})` |
-| **Drift**   | `drift_positions`    | User's Drift perp positions.                                  | `drift_positions({})` |
-| **Drift**   | `drift_place_order`  | Place perp order on Drift (stub).                             | `drift_place_order({ … })` |
-| **Kamino**  | `kamino_health`      | Kamino lending health factor for app wallet.                  | `kamino_health({})` |
-| **Kamino**  | `kamino_positions`   | Kamino lending positions (deposits, borrows).                  | `kamino_positions({})` |
-| **Kamino**  | `kamino_deposit`     | Deposit to Kamino (stub).                                     | `kamino_deposit({ … })` |
-| **Raydium** | `raydium_quote`      | Raydium swap quote (stub; prefer jupiter_quote).              | `raydium_quote({ … })` |
-| **Raydium** | `raydium_market_detect` | Detect pump.fun→Raydium migration (stub).                  | `raydium_market_detect({ … })` |
-| **Bet**     | `bet_markets`        | List Drift BET / prediction markets.                          | `bet_markets({})` |
-| **Bet**     | `bet_positions`      | User prediction market positions.                              | `bet_positions({})` |
 
 ---
 
@@ -201,7 +188,7 @@ Run a shell command with the **workspace** (or a subdirectory) as the current di
 
 - **Input**: none.
 - **Output**: `{ ok: true, payload: { timestamp, status, memory_heap_used, pid } }`.
-- **Optional**: Set `HEARTBEAT_INTERVAL_MS` in Settings → Environment (or `.env` for local `node` runs). The server logs heap stats on that interval; the **Chat** view also injects the default heartbeat user message on the same interval so the model follows **`HEARTBEAT.md`** (while Chat is visible; minimum 10s between ticks).
+- **Optional**: Set `HEARTBEAT_INTERVAL_SECONDS` in Settings → Environment. The server logs heap stats on that interval; the **Chat** view also injects the default heartbeat user message on the same interval so the model follows **`HEARTBEAT.md`** (while Chat is visible; minimum 10s between ticks).
 - **`HEARTBEAT.md`**: Workspace-relative checklist (e.g. peg/treasury checks). **Default path:** `workspace/HEARTBEAT.md` (or `WORKSPACE_DIR` if set). Edit freely; keep it short. If the file is missing, the model should not fabricate a write—use **`workspace_write`** and verify with **`workspace_read`** or the path on disk.
 
 ### 8. `cronjob`
@@ -210,7 +197,7 @@ Run a shell command with the **workspace** (or a subdirectory) as the current di
   - `expression` – Cron expression (5 fields: min hour day month weekday), e.g. `*/5 * * * *` = every 5 minutes. Hourly example: `0 * * * *` (at minute 0 of each hour).
   - `task` – One of: `log`, `heartbeat`, `check_btc` (predefined tasks only; no arbitrary shell/JS).
 - **Output**: `{ ok, message, schedule }` – e.g. `schedule: "*/5 * * * *:heartbeat"` or error if invalid expression/unknown task.
-- **Important**: Cron task **`heartbeat`** runs the same **server health** payload as the **`heartbeat`** tool (timestamp, memory, pid). It does **not** invoke the chat model and does **not** read **`HEARTBEAT.md`**. For periodic **agent** peg/checklist work, use **`HEARTBEAT_INTERVAL_MS`** (Chat view) or ask the user to trigger a heartbeat message.
+- **Important**: Cron task **`heartbeat`** runs the same **server health** payload as the **`heartbeat`** tool (timestamp, memory, pid). It does **not** invoke the chat model and does **not** read **`HEARTBEAT.md`**. For periodic **agent** peg/checklist work, use **`HEARTBEAT_INTERVAL_SECONDS`** (Chat view) or ask the user to trigger a heartbeat message.
 - **Note**: List/stop of scheduled jobs is available in code (`cronjob.listCronJobs`, `cronjob.stopCronJob`) but not exposed as LLM tools in this version.
 
 ---
@@ -289,11 +276,11 @@ All Solana wallet tools use the **app wallet** (keypair from encrypted config / 
 
 ### `treasury_pool_info`
 
-- **What it is:** **Read-only** snapshot of an **Orca Whirlpool**—intended for **monitoring / market-making context** (no fixed peg; spot math is from pool state). Implements the same strategy as **[solanaagent.app](https://www.solanaagent.app/sabtc.html)** / **`api-server.cjs`**: try **Orca** `GET https://api.orca.so/v2/solana/pools/{address}`; if the payload is missing or invalid, **decode the Whirlpool account + vault balances on Solana RPC** (ported from website `lib/orca-whirlpool-onchain.cjs`).
-- **Input**: `{ pair?, pool_address?, orca_proxy_base_url? }` — **`pair`**: `SABTC_SAUSD` (default) or `SAETH_SAUSD`; **`pool_address`** overrides **`pair`**. Optional **`orca_proxy_base_url`** e.g. `https://www.solanaagent.app/api` to call **`GET …/orca/pool/{address}`** first (identical JSON to the site UI). Pool defaults match **`treasury_pool_swap`** (`TREASURY_POOL_*` env overrides).
+- **What it is:** **Read-only** snapshot of an **Orca Whirlpool**—intended for **monitoring / market-making context** (no fixed peg; spot math is from pool state). Reads **Orca** `GET https://api.orca.so/v2/solana/pools/{address}` first; if the payload is missing or invalid, it **decodes the Whirlpool account + vault balances on Solana RPC**.
+- **Input**: `{ pair?, pool_address?, orca_proxy_base_url? }` — **`pair`**: `SABTC_SAUSD` (default) or `SAETH_SAUSD`; **`pool_address`** overrides **`pair`**. Optional **`orca_proxy_base_url`** to call **`GET {base}/orca/pool/{address}`** first. Pool defaults match **`treasury_pool_swap`** (`TREASURY_POOL_*` env overrides).
 - **Policy**: **Read-only** — allowed from **Tier 1** upward (listed with `jupiter_quote`–class tools). Uses **`SOLANA_RPC_URL`** for RPC fallback.
 - **Output**: `{ ok, pool_address, pool_data_source, data: { tokenA/B, tokenMintA/B, tokenBalanceA/B, price, feeRate, tickSpacing, tickCurrentIndex, liquidity, poolDataSource, … }, agent_report }`. **`price`** is **~token B per 1 token A** from sqrt price (indicative), **not** guaranteed execution for a size—use **`treasury_pool_swap`** with **`dry_run:true`** to simulate a trade.
-- **Refs**: Website **`/api/orca/pool/…`**, **`docs/TREASURY_POOL_TRADING.md`**.
+- **Refs**: **`docs/TREASURY_POOL_TRADING.md`**.
 
 ### `treasury_pool_swap`
 
@@ -316,59 +303,25 @@ All Solana wallet tools use the **app wallet** (keypair from encrypted config / 
 
 ---
 
-## Clawstr on solanaagent.app
+## Nostr (direct relays)
 
-Autonomous posts via **`bulletin_post`** use the **free `agent_code` API** only (no SOL). Requires **`CLAWSTR_AGENT_CODE`** in Settings or `.env` with **`./run.sh`**. No dedicated Tier-4 requirement (Tier 1 cannot run mutating tools). The app sidebar may still use a separate **paid** HTTP flow.
+### Preferred gateway: `nostr_action`
 
-### `bulletin_post`
+Use one entry point for agent reliability:
 
-- **Input**: `{ content, wallet_address? }` – post body; `wallet_address` is ignored (schema compatibility).
-- **Process**: `POST /api/v1/bulletin/post` with `agent_code` (from config/env) + `content`. If `CLAWSTR_AGENT_CODE` is missing, returns `ok: false`, `stage: "validate"`.
-- **Output (success)**: `{ ok: true, stage: "posted", mode: "agent_code", nostr_event_id, post, … }` (no `tx_signature`).
-- **Output (failure)**: `{ ok: false, stage: "validate"|"post", error, … }` — report exactly; do not claim posted without `ok: true`.
+- `nostr_action({ type: "publish", payload: { content } })`
+- `nostr_action({ type: "read", payload: { scope, limit?, ai_only? } })` where `scope` is `feed | public_feed | communities | health | public_health`
+- `nostr_action({ type: "reply", payload: { content, parent_event_id, parent_pubkey? } })`
+- `nostr_action({ type: "react", payload: { event_id, event_pubkey?, reaction? } })`
+- `nostr_action({ type: "profile", payload: { profile } })`
 
-### `bulletin_approve_and_post`
-
-- **Same as `bulletin_post`** (alias).
-
-### `bulletin_create_payment_intent` / `bulletin_get_latest_intent`
-
-- Use when you need intent details or cache inspection without posting in the same call.
-
-### Read-only APIs (native; prefer over `fetch_url`)
-
-These call **`https://www.solanaagent.app`** (see [API reference](https://www.solanaagent.app/api.html)). On success they return **`agent_report`** (markdown-ready summary), **`summary`**, and **`endpoint`**. For feeds, **`posts_preview`** holds short excerpts—**surface `agent_report` to the user** instead of pasting raw JSON.
-
-### `clawstr_health`
-
-- **Input**: none.
-- **Output**: Bridge status, public `npub`, `signing_configured`, etc.
-
-### `clawstr_feed`
-
-- **Input**: `{ limit?, ai_only? }` — `limit` ≤ 100; `ai_only` filters NIP-32 AI-tagged posts.
-- **Output**: `agent_report` with numbered excerpts; `posts_preview`, `summary`.
-
-### `clawstr_communities`
-
-- **Input**: none.
-- **Output**: Curated communities list; `agent_report` + `summary.count`.
-
-### `bulletin_public_feed`
-
-- **Input**: `{ limit? }` — public solanaagent.app feed (read-only; not posting).
-- **Output**: `agent_report`, `posts_preview`, `summary`. To publish use **`bulletin_post`**.
-
-### `bulletin_public_health`
-
-- **Input**: none.
-- **Output**: Feed service health JSON in `summary` plus `agent_report`.
+Legacy `bulletin_*` / `clawstr_*` endpoints are removed.
 
 ---
 
 ## Jupiter (prices & swap quotes)
 
-Use for **price checks** and **swap quotes** (no execution). Prefer over Raydium for general SOL/token prices and quotes.
+Use for **price checks** and **swap quotes** (no execution).
 
 ### `jupiter_price`
 
@@ -388,83 +341,10 @@ Use for **price checks** and **swap quotes** (no execution). Prefer over Raydium
 
 ---
 
-## Drift (perpetuals)
-
-Use for **perp mark price** and **user perp positions**. Place order is stub.
-
-### `drift_perp_price`
-
-- **Input**: `{ market_index? }` – optional, default 0 (SOL-PERP).
-- **Output**: Mark price (USD). Use when the user asks for SOL perp price or Drift mark price.
-
-### `drift_positions`
-
-- **Input**: none (uses app wallet).
-- **Output**: User's Drift perp positions. Use when the user asks "my Drift positions", "perp positions", or "open positions on Drift".
-
-### `drift_place_order`
-
-- **Input**: order params (stub; not yet implemented).
-- **Output**: Stub. Use when the user wants to place a perp order; report that execution is not yet available if needed.
-
----
-
-## Kamino (lending)
-
-Use for **lending health** and **positions**. Deposit is stub.
-
-### `kamino_health`
-
-- **Input**: none (uses app wallet).
-- **Output**: Health factor and related metrics. Use when the user asks "Kamino health", "lending health", "am I safe?", or for lending health checks.
-
-### `kamino_positions`
-
-- **Input**: none (uses app wallet).
-- **Output**: Deposits and borrows. Use when the user asks "my Kamino positions", "lending positions", "what am I supplying/borrowing".
-
-### `kamino_deposit`
-
-- **Input**: deposit params (stub; not yet implemented).
-- **Output**: Stub. Use when the user wants to deposit; report if execution is not yet available.
-
----
-
-## Raydium (AMM / memecoins)
-
-Use for **Raydium-specific** quotes or **pump.fun→Raydium** migration detection. For general swaps prefer `jupiter_quote`.
-
-### `raydium_quote`
-
-- **Input**: swap params (stub). Prefer `jupiter_quote` for swap quotes.
-- **Output**: Stub.
-
-### `raydium_market_detect`
-
-- **Input**: params for pump.fun→Raydium detection (stub).
-- **Output**: Stub. Use when the user asks about memecoin migration or Raydium market detection.
-
----
-
-## Bet (prediction markets)
-
-Use for **Drift BET** prediction markets and user positions.
-
-### `bet_markets`
-
-- **Input**: optional filters.
-- **Output**: List of prediction markets. Use when the user asks "what prediction markets exist", "BET markets", or "Drift prediction markets".
-
-### `bet_positions`
-
-- **Input**: none (uses app wallet).
-- **Output**: User's prediction market positions. Use when the user asks "my prediction market positions" or "BET positions".
-
----
 
 ## Skills (workspace, MCP-like)
 
 The agent reads **skills** from the workspace to learn when and how to use tools. Skills are structured docs (similar to MCP pages), not tool registrations. Paths: `workspace/skills/<name>/SKILLS.md`. The tool list above is fixed by the server; skills teach the agent how to use it.
 
-Examples: `workspace/skills/solana_swaps/SKILLS.md`, `workspace/skills/clawstr/SKILLS.md`.
+Examples: `workspace/skills/solana_swaps/SKILLS.md`.
 

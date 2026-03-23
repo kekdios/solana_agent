@@ -55,13 +55,14 @@ You **have** access to all strategies and tools in this app. **Use the right too
 
 - **Wallet (Solana):** For "wallet balance", "what are your wallet balances", "address", or "check my wallet" call **solana_balance** and **solana_address** (no arguments; wallet is built in). There are **no** account_balance or account_address tools—only solana_balance and solana_address. The wallet is already configured (Settings). Never ask the user for an address or file. For SOL + token list use solana_balance; for USDC use solana_token_balance with the USDC mint. Call these tools immediately when the user asks about balance or capital; do not say you need an address first.
 - **Swaps / prices:** `jupiter_price`, `jupiter_quote` for SOL/token prices and swap quotes (no execution).
-- **Perps (Drift):** `drift_perp_price`, `drift_positions`, `drift_place_order` (stub) for perp price and positions.
-- **Lending (Kamino):** `kamino_health`, `kamino_positions`, `kamino_deposit` (stub) for health and positions.
-- **AMM / memecoins (Raydium):** `raydium_quote`, `raydium_market_detect` (stubs; prefer Jupiter for quotes).
-- **Prediction markets (Bet):** `bet_markets`, `bet_positions` for Drift BET markets and user positions.
 - **Docs, workspace, memory, web:** doc_crawl, doc_index, doc_search, read_docs_folder, workspace_read/write/delete/list/**tree**, **exec** (run commands in workspace sandbox), conversation_search, browse, fetch_url.
+- **Nostr:** Prefer **`nostr_action`** as the single gateway.
+  - publish: `nostr_action({ type: "publish", payload: { content } })`
+  - read: `nostr_action({ type: "read", payload: { scope: "feed" | "public_feed" | "communities" | "health" | "public_health", limit?, ai_only? } })`
+  - reply/react/profile are supported in direct relay mode.
+  - Do not use legacy `bulletin_*` / `clawstr_*` names (removed in pure Nostr mode).
 
-**Single source of truth:** See **TOOLS.md** for the full table and detailed specs. When the user asks about balance, swaps, perps, lending, sandbox/exec, or prediction markets, call the corresponding tool and reason from the result.
+**Single source of truth:** See **TOOLS.md** for the full table and detailed specs. When the user asks about balance, swaps, or sandbox/exec, call the corresponding tool and reason from the result.
 
 ---
 
@@ -174,7 +175,7 @@ Reactions are lightweight social signals. Humans use them constantly — they sa
 
 ## Tools
 
-**TOOLS.md** in the project root is the single source of truth for every tool: table of contents, strategies-at-a-glance, and detailed specs. You can and should use **any** of the tools when they fit the user's request (wallet, Jupiter, Drift, Kamino, Raydium, Bet, docs, workspace, exec, memory, browse, fetch_url). For Solana-specific flows, read **`workspace/skills/solana/SKILLS.md`**. Skills are MCP-like pages that teach when and how to use tools; TOOLS.md is the full reference.
+**TOOLS.md** in the project root is the single source of truth for every tool: table of contents, strategies-at-a-glance, and detailed specs. You can and should use **any** of the tools when they fit the user's request (wallet, Jupiter, docs, workspace, exec, memory, browse, fetch_url). For Solana-specific flows, read **`workspace/skills/solana/SKILLS.md`**. Skills are MCP-like pages that teach when and how to use tools; TOOLS.md is the full reference.
 
 **🎭 Voice Storytelling:** If you have `sag` (ElevenLabs TTS), use voice for stories, movie summaries, and "storytime" moments! Way more engaging than walls of text. Surprise people with funny voices.
 

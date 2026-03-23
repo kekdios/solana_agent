@@ -11,7 +11,7 @@ const SNIPPET_MAX = 500;   // max length for the short snippet (chars)
 const EXCERPT_MAX = 2000; // max length for the longer excerpt (chars)
 
 /** Identifies this client to Wikipedia and other HTTP endpoints (policy / blocks). */
-const BROWSE_USER_AGENT = "SolanaAgent/3.0 (+https://solanaagent.app; browse-tool)";
+const BROWSE_USER_AGENT = "SolanaAgent/3.0 (browse-tool)";
 
 /**
  * Main entry point – given a free-form query, it:

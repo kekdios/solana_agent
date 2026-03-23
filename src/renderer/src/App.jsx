@@ -6,6 +6,7 @@ import QuickStartPage from "./components/QuickStartPage";
 import WalletPage from "./components/WalletPage";
 import AllMessagesPage from "./components/AllMessagesPage";
 import NanoGptPage from "./components/NanoGptPage";
+import NostrPage from "./components/NostrPage";
 import Settings from "./components/Settings";
 
 function formatTokens(n) {
@@ -105,6 +106,8 @@ function App() {
           <QuickStartPage />
         ) : view === "wallet" ? (
           <WalletPage onOpenSettings={() => setSettingsOpen(true)} />
+        ) : view === "nostr" ? (
+          <NostrPage />
         ) : view === "allMessages" ? (
           <AllMessagesPage />
         ) : view === "nanogpt" ? (

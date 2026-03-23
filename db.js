@@ -3,6 +3,8 @@ import { mkdirSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
+import { readFileSync, writeFileSync } from "fs";
+import { createDecipheriv } from "crypto";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const defaultDbPath = join(__dirname, "data", "solagent.db");
@@ -41,13 +43,13 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_token_usage_conversation ON token_usage(conversation_id);
   CREATE INDEX IF NOT EXISTS idx_token_usage_recorded_at ON token_usage(recorded_at);
-  -- Encrypted key/value store (Settings). Examples: API keys, CLAWSTR_AGENT_CODE, PORT, SOLANA_RPC_URL, wallet keys.
-  CREATE TABLE IF NOT EXISTS config (
-    key TEXT PRIMARY KEY,
-    value_encrypted TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
 `);
+
+// Config table is deprecated in favor of .env-backed config.
+// Drop it to enforce single source of truth and avoid drift.
+try {
+  db.exec(`DROP TABLE IF EXISTS config;`);
+} catch (_) {}
 
 // Swap intents for sovereign Jupiter execution (Tier 4 only). Created here to keep schema centralized.
 db.exec(`
@@ -510,21 +512,184 @@ export function getAllMessages(opts = {}) {
   return { messages: rows, oldest_id: oldestId, has_more: rows.length === limit };
 }
 
-/** Get a single config value (encrypted blob); returns null if not set. */
+const ENV_PATH = process.env.ENV_PATH || join(__dirname, ".env");
+const CONFIG_KEY_PATH = join(dirname(dbPath), ".encryption-key");
+const APP_SETTINGS_PATH = process.env.APP_SETTINGS_PATH || join(dirname(dbPath), "app-settings.json");
+const ALG = "aes-256-gcm";
+const IV_LEN = 12;
+const TAG_LEN = 16;
+const KEY_LEN = 32;
+const ENV_MANAGED_KEYS = new Set([
+  "INCEPTION_API_KEY",
+  "VENICE_ADMIN_KEY",
+  "NANOGPT_API_KEY",
+  "JUPITER_API_KEY",
+  "CLAWSTR_AGENT_CODE",
+  "NOSTR_NPUB",
+  "NOSTR_NSEC",
+  "CLAWSTR_NPUB",
+  "CLAWSTR_NSEC",
+  "SOLANA_PRIVATE_KEY",
+  "SOLANA_PUBLIC_KEY",
+  "PORT",
+  "HOST",
+  "SOLANA_RPC_URL",
+  "HEARTBEAT_INTERVAL_SECONDS",
+  "HEARTBEAT_INTERVAL_MS",
+  "WORKSPACE_DIR",
+  "DATA_DIR",
+  "SOLANA_RPC_PACE_MS",
+  "SOLANA_RPC_STAGGER_MS",
+  "BULLETIN_ADMIN_TOKEN",
+  "HELIUS_API_KEY",
+  "TEST_PRIV_KEY",
+  "TEST_ADDRESS",
+]);
+
+function readEnvMap() {
+  const out = new Map();
+  if (!existsSync(ENV_PATH)) return out;
+  const txt = readFileSync(ENV_PATH, "utf8");
+  for (const line of txt.split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!m) continue;
+    let v = m[2];
+    if (v.length >= 2 && ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))) {
+      v = v.slice(1, -1);
+      if (m[2].startsWith('"')) {
+        v = v.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+      } else {
+        v = v.replace(/'\"'\"'/g, "'");
+      }
+    }
+    out.set(m[1], v);
+  }
+  return out;
+}
+
+function writeEnvMap(map) {
+  const encode = (input) => {
+    const s = String(input ?? "");
+    if (s === "") return '""';
+    if (/^[A-Za-z0-9_./:@,+\-]+$/.test(s)) return s;
+    if (!s.includes("'") && !s.includes("\n")) return `'${s}'`;
+    const escaped = s.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/"/g, '\\"');
+    return `"${escaped}"`;
+  };
+  const lines = [];
+  for (const [k, v] of Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+    lines.push(`${k}=${encode(v)}`);
+  }
+  writeFileSync(ENV_PATH, lines.join("\n") + "\n", "utf8");
+}
+
+function readAppSettingsMap() {
+  try {
+    if (!existsSync(APP_SETTINGS_PATH)) return new Map();
+    const raw = readFileSync(APP_SETTINGS_PATH, "utf8").trim();
+    if (!raw) return new Map();
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Map();
+    const out = new Map();
+    for (const [k, v] of Object.entries(parsed)) out.set(String(k), v == null ? "" : String(v));
+    return out;
+  } catch {
+    return new Map();
+  }
+}
+
+function writeAppSettingsMap(map) {
+  try {
+    mkdirSync(dirname(APP_SETTINGS_PATH), { recursive: true });
+  } catch (_) {}
+  const obj = {};
+  for (const [k, v] of Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+    obj[k] = String(v ?? "");
+  }
+  writeFileSync(APP_SETTINGS_PATH, JSON.stringify(obj, null, 2) + "\n", "utf8");
+}
+
+function maybeMigrateNonSecretEnvToJson() {
+  const appMap = readAppSettingsMap();
+  if (appMap.size > 0) return;
+  const envMap = readEnvMap();
+  let moved = 0;
+  for (const [k, v] of envMap.entries()) {
+    if (ENV_MANAGED_KEYS.has(k)) continue;
+    appMap.set(k, String(v ?? ""));
+    moved++;
+  }
+  if (moved > 0) writeAppSettingsMap(appMap);
+}
+
+function maybeDecryptLegacyValue(input) {
+  const val = String(input ?? "");
+  if (!val) return "";
+  if (!existsSync(CONFIG_KEY_PATH)) return val;
+  let key;
+  try {
+    key = readFileSync(CONFIG_KEY_PATH);
+  } catch {
+    return val;
+  }
+  if (!key || key.length !== KEY_LEN) return val;
+  try {
+    const buf = Buffer.from(val, "base64");
+    if (buf.length < IV_LEN + TAG_LEN) return val;
+    const iv = buf.subarray(0, IV_LEN);
+    const tag = buf.subarray(IV_LEN, IV_LEN + TAG_LEN);
+    const enc = buf.subarray(IV_LEN + TAG_LEN);
+    const decipher = createDecipheriv(ALG, key, iv, { authTagLength: TAG_LEN });
+    decipher.setAuthTag(tag);
+    const dec = decipher.update(enc) + decipher.final("utf8");
+    return dec;
+  } catch {
+    return val;
+  }
+}
+
+/** Get a single config value (plaintext from .env); returns null if not set. */
 export function getConfig(key) {
-  const row = db.prepare("SELECT value_encrypted FROM config WHERE key = ?").get(String(key));
-  return row ? row.value_encrypted : null;
+  const k = String(key || "").trim();
+  if (!k) return null;
+  if (ENV_MANAGED_KEYS.has(k)) {
+    const map = readEnvMap();
+    if (map.has(k)) return map.get(k);
+    return process.env[k] ?? null;
+  }
+  const appMap = readAppSettingsMap();
+  if (appMap.has(k)) return appMap.get(k);
+  const envMap = readEnvMap();
+  if (envMap.has(k)) return envMap.get(k);
+  return process.env[k] ?? null;
 }
 
-/** Set a config value (store encrypted blob). */
+/** Set a config value in .env (accepts legacy encrypted payloads and auto-decrypts). */
 export function setConfig(key, valueEncrypted) {
-  db.prepare(
-    "INSERT INTO config (key, value_encrypted, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value_encrypted = excluded.value_encrypted, updated_at = datetime('now')"
-  ).run(String(key), valueEncrypted);
+  const k = String(key || "").trim();
+  if (!k) return;
+  const plain = maybeDecryptLegacyValue(valueEncrypted);
+  if (ENV_MANAGED_KEYS.has(k)) {
+    const envMap = readEnvMap();
+    envMap.set(k, plain);
+    writeEnvMap(envMap);
+  } else {
+    const appMap = readAppSettingsMap();
+    appMap.set(k, plain);
+    writeAppSettingsMap(appMap);
+  }
+  process.env[k] = plain;
 }
 
-/** List all config keys (and updated_at) for UI; does not return secret values. */
+/** List all config keys from .env for UI compatibility. */
 export function listConfigKeys() {
-  const rows = db.prepare("SELECT key, updated_at FROM config ORDER BY key").all();
-  return rows;
+  const keys = new Set();
+  for (const k of readEnvMap().keys()) keys.add(k);
+  for (const k of readAppSettingsMap().keys()) keys.add(k);
+  const nowIso = new Date().toISOString();
+  return Array.from(keys)
+    .sort((a, b) => a.localeCompare(b))
+    .map((key) => ({ key, updated_at: nowIso }));
 }
+
+maybeMigrateNonSecretEnvToJson();

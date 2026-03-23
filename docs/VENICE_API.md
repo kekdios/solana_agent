@@ -29,7 +29,7 @@ Authorization: Bearer VENICE_API_KEY
 
 > **Security:** Your API key is a secret. Do not share it or expose it in client-side code.
 
-In this app, the Venice key is stored as `VENICE_ADMIN_KEY` in `.env` or in the encrypted config table (Settings → Venice API key).
+In this app, the Venice key is stored as `VENICE_ADMIN_KEY` in `.env` (Settings → Venice API key).
 
 ---
 

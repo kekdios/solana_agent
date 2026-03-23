@@ -3,6 +3,35 @@ import { useChatStore } from "../store/chatStore";
 
 const setSolanaNetwork = (n) => useChatStore.getState().setSolanaNetwork(n);
 const setSolanaRpcConnected = (c) => useChatStore.getState().setSolanaRpcConnected(c);
+const ENV_MANAGED_KEYS = new Set([
+  "INCEPTION_API_KEY",
+  "VENICE_ADMIN_KEY",
+  "NANOGPT_API_KEY",
+  "JUPITER_API_KEY",
+  "NOSTR_NPUB",
+  "NOSTR_NSEC",
+  "SOLANA_PRIVATE_KEY",
+  "SOLANA_PUBLIC_KEY",
+  "PORT",
+  "HOST",
+  "SOLANA_RPC_URL",
+  "HEARTBEAT_INTERVAL_SECONDS",
+  "HEARTBEAT_INTERVAL_MS",
+  "WORKSPACE_DIR",
+  "DATA_DIR",
+  "SOLANA_RPC_PACE_MS",
+  "SOLANA_RPC_STAGGER_MS",
+  "BULLETIN_ADMIN_TOKEN",
+  "HELIUS_API_KEY",
+  "TEST_PRIV_KEY",
+  "TEST_ADDRESS",
+]);
+const settingsStoreFor = (key) => (ENV_MANAGED_KEYS.has(key) ? ".env" : "app-settings.json");
+const SettingsStoreBadge = ({ settingKey }) => (
+  <span className="ml-1.5 rounded px-1.5 py-0.5 text-[10px] leading-none bg-slate-700/60 text-slate-300">
+    {settingsStoreFor(settingKey)}
+  </span>
+);
 
 export default function Settings({ onClose }) {
   const apiBase = useChatStore((s) => s.apiBase) || "";
@@ -11,12 +40,10 @@ export default function Settings({ onClose }) {
   const [veniceKeyInput, setVeniceKeyInput] = useState("");
   const [nanogptKeyInput, setNanogptKeyInput] = useState("");
   const [jupiterKeyInput, setJupiterKeyInput] = useState("");
-  const [clawstrAgentCodeInput, setClawstrAgentCodeInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [savingVenice, setSavingVenice] = useState(false);
   const [savingNanogpt, setSavingNanogpt] = useState(false);
   const [savingJupiter, setSavingJupiter] = useState(false);
-  const [savingClawstrAgent, setSavingClawstrAgent] = useState(false);
   const [message, setMessage] = useState(null);
 
   const [walletEnsuring, setWalletEnsuring] = useState(false);
@@ -73,7 +100,7 @@ export default function Settings({ onClose }) {
       setEnvPort(env.PORT ?? "");
       setEnvHost(env.HOST ?? "");
       setEnvSolanaRpc(env.SOLANA_RPC_URL ?? "");
-      setEnvHeartbeatMs(env.HEARTBEAT_INTERVAL_MS ?? "");
+      setEnvHeartbeatMs(env.HEARTBEAT_INTERVAL_SECONDS ?? env.HEARTBEAT_INTERVAL_MS ?? "");
       setEnvWorkspaceDir(env.WORKSPACE_DIR ?? "");
       setEnvDataDir(env.DATA_DIR ?? "");
       setEnvSolanaRpcPaceMs(env.SOLANA_RPC_PACE_MS ?? "");
@@ -231,43 +258,6 @@ export default function Settings({ onClose }) {
     }
   };
 
-  const handleSaveClawstrAgentCode = async (e) => {
-    e.preventDefault();
-    setSavingClawstrAgent(true);
-    setMessage(null);
-    try {
-      const res = await fetch(`${apiBase}/api/config`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: "CLAWSTR_AGENT_CODE", value: clawstrAgentCodeInput.trim() }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        const v = clawstrAgentCodeInput.trim();
-        setMessage({
-          type: "success",
-          text: v
-            ? "CLAWSTR_AGENT_CODE saved to config database (encrypted). bulletin_post can use free publishing."
-            : "CLAWSTR_AGENT_CODE cleared from config database. If unset, bulletin_post may use .env when the server loads it.",
-        });
-        setConfig((c) => ({
-          ...c,
-          CLAWSTR_AGENT_CODE: {
-            status: v ? "CONFIGURED" : "NOT_CONFIGURED",
-            masked: v && v.length > 8 ? v.slice(0, 4) + "…" + v.slice(-4) : v ? "••••" : null,
-          },
-        }));
-        setClawstrAgentCodeInput("");
-      } else {
-        setMessage({ type: "error", text: data.error || "Failed to save" });
-      }
-    } catch (err) {
-      setMessage({ type: "error", text: err.message || "Request failed" });
-    } finally {
-      setSavingClawstrAgent(false);
-    }
-  };
-
   const handleTestConnection = async () => {
     setTestingConnection(true);
     setMessage(null);
@@ -339,7 +329,7 @@ export default function Settings({ onClose }) {
     setMessage(null);
     setSavingSwaps(true);
     try {
-      // Persist policy keys in the config table.
+      // Persist policy keys in app-settings.json through /api/config.
       for (const [key, value] of Object.entries(patch)) {
         const res = await fetch(`${apiBase}/api/config`, {
           method: "POST",
@@ -498,7 +488,7 @@ export default function Settings({ onClose }) {
       { key: "PORT", value: envPort.trim() },
       { key: "HOST", value: envHost.trim() },
       { key: "SOLANA_RPC_URL", value: envSolanaRpc.trim() },
-      { key: "HEARTBEAT_INTERVAL_MS", value: envHeartbeatMs.trim() },
+      { key: "HEARTBEAT_INTERVAL_SECONDS", value: envHeartbeatMs.trim() },
       { key: "WORKSPACE_DIR", value: envWorkspaceDir.trim() },
       { key: "DATA_DIR", value: envDataDir.trim() },
       { key: "SOLANA_RPC_PACE_MS", value: envSolanaRpcPaceMs.trim() },
@@ -941,7 +931,7 @@ export default function Settings({ onClose }) {
             </p>
             <p className="text-xs text-slate-500 mt-2 border-t border-[#2a2a30] pt-2">
               <span className="text-slate-400">Custom RPC URL</span> (e.g. PublicNode, Helius): use{" "}
-              <span className="text-slate-300 font-medium">Environment (config table)</span> below →{" "}
+              <span className="text-slate-300 font-medium">Environment (.env)</span> below →{" "}
               <span className="font-mono text-slate-400">SOLANA_RPC_URL</span> → Save environment.
             </p>
           </section>
@@ -1107,7 +1097,9 @@ export default function Settings({ onClose }) {
 
                 <div className="mt-3 grid grid-cols-1 gap-3">
                   <div>
-                    <label className="text-xs text-slate-500 block mb-1">Cooldown (seconds)</label>
+                    <label className="text-xs text-slate-500 block mb-1">
+                      Cooldown (seconds) <SettingsStoreBadge settingKey="SWAPS_COOLDOWN_SECONDS" />
+                    </label>
                     <input
                       type="text"
                       value={swapsCooldownSeconds}
@@ -1117,7 +1109,9 @@ export default function Settings({ onClose }) {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-slate-500 block mb-1">Max swaps / hour</label>
+                      <label className="text-xs text-slate-500 block mb-1">
+                        Max swaps / hour <SettingsStoreBadge settingKey="SWAPS_MAX_SWAPS_PER_HOUR" />
+                      </label>
                       <input
                         type="text"
                         value={swapsMaxPerHour}
@@ -1126,7 +1120,9 @@ export default function Settings({ onClose }) {
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-slate-500 block mb-1">Max swaps / day</label>
+                      <label className="text-xs text-slate-500 block mb-1">
+                        Max swaps / day <SettingsStoreBadge settingKey="SWAPS_MAX_SWAPS_PER_DAY" />
+                      </label>
                       <input
                         type="text"
                         value={swapsMaxPerDay}
@@ -1136,7 +1132,9 @@ export default function Settings({ onClose }) {
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 block mb-1">Max daily SOL swap volume</label>
+                    <label className="text-xs text-slate-500 block mb-1">
+                      Max daily SOL swap volume <SettingsStoreBadge settingKey="SWAPS_MAX_DAILY_SWAP_SOL_VOLUME" />
+                    </label>
                     <input
                       type="text"
                       value={swapsMaxDailySol}
@@ -1167,7 +1165,9 @@ export default function Settings({ onClose }) {
                 </p>
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">Max slippage (bps; 200 = 2%, 50 = 0.5%)</label>
+                <label className="text-xs text-slate-500 block mb-1">
+                  Max slippage (bps; 200 = 2%, 50 = 0.5%) <SettingsStoreBadge settingKey="SWAPS_MAX_SLIPPAGE_BPS" />
+                </label>
                 <input
                   type="text"
                   value={swapsMaxSlippageBps}
@@ -1177,7 +1177,9 @@ export default function Settings({ onClose }) {
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">Max swap size (SOL)</label>
+                <label className="text-xs text-slate-500 block mb-1">
+                  Max swap size (SOL) <SettingsStoreBadge settingKey="SWAPS_MAX_SWAP_SOL" />
+                </label>
                 <input
                   type="text"
                   value={swapsMaxSwapSol}
@@ -1186,7 +1188,9 @@ export default function Settings({ onClose }) {
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">Max swap % of balance</label>
+                <label className="text-xs text-slate-500 block mb-1">
+                  Max swap % of balance <SettingsStoreBadge settingKey="SWAPS_MAX_SWAP_PCT_BALANCE" />
+                </label>
                 <input
                   type="text"
                   value={swapsMaxSwapPct}
@@ -1215,61 +1219,19 @@ export default function Settings({ onClose }) {
           </section>
 
           <section className="rounded-xl bg-[#222228] border border-[#2a2a30] p-4">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-medium uppercase tracking-wider text-slate-400">Clawstr (solanaagent.app)</span>
-              <span
-                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-                  config?.CLAWSTR_AGENT_CODE?.status === "CONFIGURED" ? "bg-emerald-500/20 text-emerald-400" : "bg-slate-600/30 text-slate-400"
-                }`}
-              >
-                {config?.CLAWSTR_AGENT_CODE?.status === "CONFIGURED" && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                )}
-                {config?.CLAWSTR_AGENT_CODE?.status === "CONFIGURED" ? "CODE IN DB" : "NO CODE IN DB"}
-              </span>
-            </div>
-            <p className="text-sm text-slate-500 mb-3">
-              <span className="font-mono text-slate-400">bulletin_post</span> uses the free <span className="font-mono text-slate-400">agent_code</span> API (no SOL). The value is stored encrypted in <span className="text-slate-400">solagent.db</span> under config key{" "}
-              <span className="font-mono text-slate-400">CLAWSTR_AGENT_CODE</span>. Tier 1 stays read-only; no Tier 4 for posting. The sidebar shows the last post result for this chat. For local dev from the repo you can also set{" "}
-              <span className="font-mono text-slate-400">CLAWSTR_AGENT_CODE</span> in <span className="font-mono text-slate-400">.env</span> and use <span className="font-mono text-slate-400">./run.sh</span> (DB value overrides when present).
+            <span className="text-xs font-medium uppercase tracking-wider text-slate-400 block mb-3">Environment</span>
+            <p className="text-sm text-slate-500 mb-3">These keys are managed in <span className="font-mono text-slate-400">.env</span>. PORT/HOST apply after restart.</p>
+            <p className="text-xs text-slate-500 mb-3">
+              Policy/tuning keys like <span className="font-mono text-slate-400">SWAPS_*</span>,{" "}
+              <span className="font-mono text-slate-400">SECURITY_TIER</span>, and{" "}
+              <span className="font-mono text-slate-400">PASSPHRASE_BACKUP_ACKNOWLEDGED</span> are managed in{" "}
+              <span className="font-mono text-slate-400">app-settings.json</span>.
             </p>
-            {config?.CLAWSTR_AGENT_CODE?.masked && (
-              <p className="text-sm text-slate-500 mb-3">
-                Stored value (masked): <span className="font-mono text-slate-300">{config.CLAWSTR_AGENT_CODE.masked}</span>
-              </p>
-            )}
-            <form onSubmit={handleSaveClawstrAgentCode} className="space-y-3">
-              <div>
-                <label htmlFor="clawstr-agent-code" className="text-xs text-slate-500 block mb-1">
-                  CLAWSTR_AGENT_CODE <span className="text-slate-600">(config table)</span>
-                </label>
-                <input
-                  id="clawstr-agent-code"
-                  type="password"
-                  value={clawstrAgentCodeInput}
-                  onChange={(e) => setClawstrAgentCodeInput(e.target.value)}
-                  placeholder="Paste new code to save or replace"
-                  className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50"
-                  autoComplete="off"
-                />
-                <p className="text-xs text-slate-600 mt-1">Leave blank and click Save to clear the stored code (falls back to process env if set).</p>
-              </div>
-              <button
-                type="submit"
-                disabled={savingClawstrAgent}
-                className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 py-1.5 text-sm font-medium text-white transition"
-              >
-                {savingClawstrAgent ? "Saving…" : "Save to config database"}
-              </button>
-            </form>
-          </section>
-
-          <section className="rounded-xl bg-[#222228] border border-[#2a2a30] p-4">
-            <span className="text-xs font-medium uppercase tracking-wider text-slate-400 block mb-3">Environment (config table)</span>
-            <p className="text-sm text-slate-500 mb-3">Stored in solagent.db. PORT/HOST apply after restart. (.env is for testing only.)</p>
             <form onSubmit={handleSaveEnv} className="space-y-3">
               <div>
-                <label className="text-xs text-slate-500 block mb-1">PORT</label>
+                <label className="text-xs text-slate-500 block mb-1">
+                  PORT <SettingsStoreBadge settingKey="PORT" />
+                </label>
                 <input
                   type="text"
                   value={envPort}
@@ -1279,7 +1241,9 @@ export default function Settings({ onClose }) {
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">HOST</label>
+                <label className="text-xs text-slate-500 block mb-1">
+                  HOST <SettingsStoreBadge settingKey="HOST" />
+                </label>
                 <input
                   type="text"
                   value={envHost}
@@ -1289,7 +1253,9 @@ export default function Settings({ onClose }) {
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">SOLANA_RPC_URL</label>
+                <label className="text-xs text-slate-500 block mb-1">
+                  SOLANA_RPC_URL <SettingsStoreBadge settingKey="SOLANA_RPC_URL" />
+                </label>
                 <input
                   type="text"
                   value={envSolanaRpc}
@@ -1299,7 +1265,9 @@ export default function Settings({ onClose }) {
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">SOLANA_RPC_PACE_MS</label>
+                <label className="text-xs text-slate-500 block mb-1">
+                  SOLANA_RPC_PACE_MS <SettingsStoreBadge settingKey="SOLANA_RPC_PACE_MS" />
+                </label>
                 <input
                   type="text"
                   value={envSolanaRpcPaceMs}
@@ -1312,7 +1280,9 @@ export default function Settings({ onClose }) {
                 </p>
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">SOLANA_RPC_STAGGER_MS</label>
+                <label className="text-xs text-slate-500 block mb-1">
+                  SOLANA_RPC_STAGGER_MS <SettingsStoreBadge settingKey="SOLANA_RPC_STAGGER_MS" />
+                </label>
                 <input
                   type="text"
                   value={envSolanaRpcStaggerMs}
@@ -1325,12 +1295,14 @@ export default function Settings({ onClose }) {
                 </p>
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">HEARTBEAT_INTERVAL_MS</label>
+                <label className="text-xs text-slate-500 block mb-1">
+                  HEARTBEAT_INTERVAL_SECONDS <SettingsStoreBadge settingKey="HEARTBEAT_INTERVAL_SECONDS" />
+                </label>
                 <input
                   type="text"
                   value={envHeartbeatMs}
                   onChange={(e) => setEnvHeartbeatMs(e.target.value)}
-                  placeholder="1800000 (30m) or leave empty to disable"
+                  placeholder="1800 (30m) or leave empty to disable"
                   className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                 />
                 <p className="text-xs text-slate-500 mt-1">
@@ -1338,7 +1310,9 @@ export default function Settings({ onClose }) {
                 </p>
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">WORKSPACE_DIR</label>
+                <label className="text-xs text-slate-500 block mb-1">
+                  WORKSPACE_DIR <SettingsStoreBadge settingKey="WORKSPACE_DIR" />
+                </label>
                 <input
                   type="text"
                   value={envWorkspaceDir}
@@ -1348,7 +1322,9 @@ export default function Settings({ onClose }) {
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-500 block mb-1">DATA_DIR</label>
+                <label className="text-xs text-slate-500 block mb-1">
+                  DATA_DIR <SettingsStoreBadge settingKey="DATA_DIR" />
+                </label>
                 <input
                   type="text"
                   value={envDataDir}

@@ -4,11 +4,25 @@
 
 **Wallet:** For "what are your wallet balances", "balance", or "address" use **solana_balance** and **solana_address** only. There are no account_balance or account_address tools in this app.
 
-**Strategies:** Wallet · Swaps/prices (Jupiter) · Perps (Drift) · Lending (Kamino) · Raydium · Bet · Docs · Workspace · **Sandbox (exec)** · Memory · Web/API (browse, fetch_url).
+**Strategies:** Wallet · Swaps/prices (Jupiter) · Docs · Workspace · **Sandbox (exec)** · Memory · Web/API (browse, fetch_url).
 
 Do not say you cannot do something if a tool exists for it. Call the right tool and reason from the result.
 
 **Solana Agent V3:** In-app chat **always** receives the full function-tool list from the server. Never tell the user you have no tools or no workspace access in this app. For explicit “content of **HEARTBEAT.md** / **heartbeat.md**” questions, the server may read the file from disk before the model runs—see root **README.md** and **TOOLS.md**.
+
+## Nostr (single-tool preference)
+
+Use **`nostr_action`** as the default and preferred path for all Nostr tasks. This improves reliability by avoiding tool-routing ambiguity.
+
+- **Publish post:** `nostr_action({ type: "publish", payload: { content: "..." } })`
+- **Read feed:** `nostr_action({ type: "read", payload: { scope: "feed", limit: 20, ai_only: true } })`
+- **Read communities:** `nostr_action({ type: "read", payload: { scope: "communities" } })`
+- **Health:** `nostr_action({ type: "read", payload: { scope: "health" } })`
+- **Public feed:** `nostr_action({ type: "read", payload: { scope: "public_feed", limit: 20 } })`
+- **Reply/react/profile:** use `type: "reply"` / `type: "react"` / `type: "profile"` payloads
+
+Legacy `bulletin_*` / `clawstr_*` paths are removed in pure Nostr mode.
+- UI note: **Sidebar -> Nostr** opens the agent-post timeline (kind 1111, paged relay reads).
 
 ---
 
@@ -18,10 +32,6 @@ Do not say you cannot do something if a tool exists for it. Call the right tool 
 | ------------------- | ----- |
 | **Wallet** | solana_address, solana_balance, solana_transfer, solana_network, solana_token_balance, solana_transfer_spl, solana_tx_history, solana_tx_status |
 | **Jupiter** | jupiter_price, jupiter_quote |
-| **Drift** | drift_perp_price, drift_positions, drift_place_order |
-| **Kamino** | kamino_health, kamino_positions, kamino_deposit |
-| **Raydium** | raydium_quote, raydium_market_detect |
-| **Bet** | bet_markets, bet_positions |
 | **Docs** | doc_crawl, doc_index, doc_search, read_docs_folder |
 | **Workspace** | workspace_read, workspace_write, workspace_delete, workspace_list, workspace_tree — for **any** file/directory listing, call **workspace_tree** or **workspace_list** first; never invent file trees |
 | **Sandbox** | exec (run shell commands in workspace; create programs with workspace_write, then exec) |

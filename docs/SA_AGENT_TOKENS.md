@@ -5,7 +5,7 @@ Applies to **Solana Agent V3** (same tools in `config/tools.yaml` / **TOOLS.md**
 The Solana Agent is **born with**:
 
 - **`solana_agent_token_send`** — send **SABTC**, **SAETH**, or **SAUSD** by **symbol** (canonical mints built in).
-- **`treasury_pool_info`** — **read-only** Whirlpool snapshot for **SABTC/SAUSD** or **SAETH/SAUSD** (or any `pool_address`): Orca API then on-chain fallback (aligned with **solanaagent.app**). Vault balances, spot price (token B per 1 token A), tick, liquidity, fees. Use for monitoring / market-making context; use **`treasury_pool_swap`** + **`dry_run:true`** for an executable quote at a chosen size.
+- **`treasury_pool_info`** — **read-only** Whirlpool snapshot for **SABTC/SAUSD** or **SAETH/SAUSD** (or any `pool_address`): Orca API then on-chain fallback . Vault balances, spot price (token B per 1 token A), tick, liquidity, fees. Use for monitoring / market-making context; use **`treasury_pool_swap`** + **`dry_run:true`** for an executable quote at a chosen size.
 - **`treasury_pool_swap`** — swap **SABTC↔SAUSD** or **SAETH↔SAUSD** on Orca Whirlpools (**Orca SDK only**), same app wallet. Complements balance checks and sends. **Tier 4**; needs Swaps enabled for live execution; **`dry_run:true`** simulates without sending. See **`docs/TREASURY_POOL_TRADING.md`**.
 
 | Symbol | Role |

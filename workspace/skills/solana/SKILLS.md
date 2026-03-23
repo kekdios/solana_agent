@@ -12,7 +12,7 @@ When summarizing **diagnostics**, copy **`mint`**, **`built_in_mint`**, and **`m
 |------|------|
 | **`solana_token_balance`** | When the user asks how much SABTC, SAETH, SAUSD, or **agent dollars** they have. Pass **`token_symbol`** only (`SABTC`, `SAETH`, or `SAUSD`)—server resolves mint; do not paste mints for these three. |
 | **`solana_agent_token_send`** | When the user clearly wants to **send** one of those symbols (**Tier 4**). `token_symbol`, `to`, `amount_ui` or `amount`. |
-| **`treasury_pool_info`** | **Read-only** pool snapshot (vault balances, spot price as token B per 1 token A, tick, liquidity, fees)—same logic as **solanaagent.app** `/api/orca/pool/…` (Orca API, else RPC decode). `pair`: `SABTC_SAUSD` (default) or `SAETH_SAUSD`, or `pool_address`. Optional `orca_proxy_base_url` to hit the site proxy first. For **market-making / monitoring**; not an executable quote—use **`treasury_pool_swap`** + **`dry_run:true`** to simulate a size. |
+| **`treasury_pool_info`** | **Read-only** pool snapshot (vault balances, spot price as token B per 1 token A, tick, liquidity, fees) using Orca API with RPC decode fallback. `pair`: `SABTC_SAUSD` (default) or `SAETH_SAUSD`, or `pool_address`. Optional `orca_proxy_base_url` for a custom proxy. For **market-making / monitoring**; not an executable quote—use **`treasury_pool_swap`** + **`dry_run:true`** to simulate a size. |
 | **`treasury_pool_swap`** | When the user wants to **trade** SABTC/SAETH against SAUSD in the **native Whirlpool** (not Jupiter). `input_token_symbol`, `output_token_symbol`, `amount` or `amount_ui`. Use **`dry_run:true`** first if unsure. **Tier 4**. **Not** gated by Settings → Swaps **`SWAPS_EXECUTION_ENABLED`** / **`SWAPS_ENABLED`** (those are **Jupiter** only). Real tool results include **`_treasury_swap_server`**. |
 
 Canonical mints are **built in** for send/swap; for balance use **`token_symbol`** for the three native tokens. Use **`solana_transfer_spl`** only for **other** SPL mints (e.g. USDC).
@@ -68,38 +68,6 @@ For **executing** swaps (not just quotes), use the prepare→confirm→execute f
 
 ---
 
-## Perps (Drift)
-
-| User asks | Tool(s) to use |
-| --------- | --------------- |
-| "SOL perp price" / "Drift mark price" | `drift_perp_price` |
-| "My Drift positions" / "Open perp positions" | `drift_positions` |
-| "Place a perp order" | `drift_place_order` (stub; report if not yet implemented) |
-
----
-
-## Lending (Kamino)
-
-| User asks | Tool(s) to use |
-| --------- | --------------- |
-| "Kamino health" / "Lending health" / "Am I safe?" | `kamino_health` |
-| "My Kamino positions" / "What am I supplying/borrowing?" | `kamino_positions` |
-| "Deposit to Kamino" | `kamino_deposit` (stub; report if not yet implemented) |
-
-Use `kamino_health` and `kamino_positions` when the user asks about lending status.
-
----
-
-## Raydium and Bet (prediction markets)
-
-| User asks | Tool(s) to use |
-| --------- | --------------- |
-| Raydium swap quote | `raydium_quote` (stub; prefer `jupiter_quote` for quotes) |
-| Pump.fun → Raydium migration / memecoin | `raydium_market_detect` (stub) |
-| "What prediction markets exist?" / "BET markets" | `bet_markets` |
-| "My prediction market positions" | `bet_positions` |
-
----
 
 ## Sandbox (exec)
 
@@ -116,9 +84,6 @@ Commands run with the workspace (or workdir) as cwd; output is capped and timeou
 
 - **Wallet:** address, balance, transfer SOL/SPL, native SABTC/SAETH/SAUSD (`solana_token_balance`, `solana_agent_token_send`, **`treasury_pool_info`**, **`treasury_pool_swap`**), network, tx history/status — use the matching tool.
 - **Prices / swaps:** Jupiter for price and quote; no execution.
-- **Perps:** Drift for price and positions; place order is stub.
-- **Lending:** Kamino for health and positions; deposit is stub.
-- **Bet:** markets and positions.
 - **Sandbox:** Create scripts with `workspace_write`, run with `exec` (command, workdir, timeout).
 
 When in doubt, call the tool and reason from the result. Do not say you cannot do something if a tool exists for it.

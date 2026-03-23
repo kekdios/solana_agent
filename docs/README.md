@@ -1,6 +1,6 @@
 # Solana Agent — Documentation
 
-**App release: V3** (`package.json` **3.0.0**; sidebar shows **V3** + semver + date). Stack: **Node `server.js`** + **React UI** (`dist-renderer/`) + **SQLite** `data/solagent.db`.
+**App release: V3** (`package.json` **3.0.1**; sidebar shows **V3** + semver + date). Stack: **Node `server.js`** + **React UI** (`dist-renderer/`) + **SQLite** `data/solagent.db`.
 
 | Document | Description |
 |----------|-------------|
@@ -12,6 +12,6 @@
 | **SA_AGENT_TOKENS.md** | Native agent SPL send, canonical mints, treasury pool tools, Hyperliquid mids. |
 | **TREASURY_POOL_TRADING.md** | SABTC/SAETH/SAUSD Whirlpool, `treasury_pool_swap`, `HEARTBEAT.md` peg checklist notes. |
 | **agent-prediction-arena-plan.md** | Future design notes (agent-vs-agent arena; not shipped). |
-| **Heartbeat** | **`workspace/HEARTBEAT.md`** + **`HEARTBEAT_INTERVAL_MS`**. Cron **`heartbeat`** task ≠ model checklist. Server may return HEARTBEAT file content directly for explicit “content of heartbeat.md” questions—see root **README.md** (Chat V3). |
+| **Heartbeat** | **`workspace/HEARTBEAT.md`** + **`HEARTBEAT_INTERVAL_SECONDS`**. Cron **`heartbeat`** task ≠ model checklist. Server may return HEARTBEAT file content directly for explicit “content of heartbeat.md” questions—see root **README.md** (Chat V3). |
 
-The main project README is in the repository root. Product site: **https://solanaagent.app**.
+The main project README is in the repository root. Runtime behavior here is local-first (server + renderer in this workspace).

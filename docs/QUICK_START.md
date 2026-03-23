@@ -37,7 +37,13 @@ Click the **gear icon** (top right) → configure:
 - **Jupiter swaps key** (required for sovereign swaps):
   - **`JUPITER_API_KEY`**
 
-All keys saved in Settings are stored in the app’s **SQLite config table** and are **encrypted at rest**.
+Settings persist secrets/bootstrap values in **`.env`** and maintainable policy values in **`data/app-settings.json`**.
+
+### Nostr keys (quick note)
+
+- Direct signing uses **`NOSTR_NSEC`** (required to publish/reply/react/profile).
+- Optional: **`NOSTR_NPUB`** and **`NOSTR_RELAYS`** in `.env` (custom relay list).
+- In the app, open **Sidebar → Nostr** to view this agent's kind-1111 posts with paging.
 
 ---
 
@@ -45,11 +51,12 @@ All keys saved in Settings are stored in the app’s **SQLite config table** and
 
 In **Settings → Solana Wallet**: generate or import a wallet, fund it with SOL, and complete backup steps.
 
-Then continue from the root **README.md** and **TOOLS.md**: security **tier** (Tier 4 for swap execution), **Swaps** toggles, **Clawstr** (`CLAWSTR_AGENT_CODE`), optional **`HEARTBEAT_INTERVAL_MS`** for periodic checklist messages in Chat.
+Then continue from the root **README.md** and **TOOLS.md**: security **tier** (Tier 4 for swap execution), **Swaps** toggles, and optional **`HEARTBEAT_INTERVAL_SECONDS`** for periodic checklist messages in Chat.
 
 ---
 
 ## Reload vs restart
 
 - **Sidebar → Reload** refreshes the **browser page** only.
+- **Sidebar → Nostr** opens the agent-post timeline page (read-only relay query by the configured Nostr identity).
 - To **stop** the API server, go to the terminal where **`node server.js`** is running and press **Ctrl+C**. Start again with `./build-and-run.sh` or `node server.js`.

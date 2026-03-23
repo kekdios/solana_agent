@@ -20,6 +20,37 @@ const MPL_TOKEN_METADATA = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt5
 const DISC_LEN = 8;
 const MIN_DATA_LEN = DISC_LEN + 261;
 
+// In-memory caches to reduce repeated RPC fan-out during heartbeat loops.
+const poolInfoCache = new Map();
+const mintInfoCache = new Map();
+const metadataCache = new Map();
+
+function nowMs() {
+  return Date.now();
+}
+
+function getTtlMs(name, fallbackMs) {
+  const raw = String(process.env[name] ?? "").trim();
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return fallbackMs;
+  return Math.floor(n);
+}
+
+function getCached(cache, key) {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt <= nowMs()) {
+    cache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function setCached(cache, key, value, ttlMs) {
+  if (ttlMs <= 0) return;
+  cache.set(key, { value, expiresAt: nowMs() + ttlMs });
+}
+
 function formatWhirlpoolSwapFeePercent(feeRate, decimalPlaces = 4) {
   const n = Number(feeRate);
   if (!Number.isFinite(n) || n < 0) return "—";
@@ -63,6 +94,24 @@ async function fetchMplTokenMetadataNameSymbol(connection, mintPk) {
   const acc = await connection.getAccountInfo(pda);
   if (!acc || !acc.data) return { name: null, symbol: null };
   return decodeMplTokenMetadataNameSymbol(Buffer.from(acc.data));
+}
+
+async function getMintCached(connection, mintPk) {
+  const key = mintPk.toBase58();
+  const hit = getCached(mintInfoCache, key);
+  if (hit) return hit;
+  const mint = await getMint(connection, mintPk);
+  setCached(mintInfoCache, key, mint, getTtlMs("TREASURY_MINT_CACHE_MS", 60 * 60 * 1000));
+  return mint;
+}
+
+async function getMetadataCached(connection, mintPk) {
+  const key = mintPk.toBase58();
+  const hit = getCached(metadataCache, key);
+  if (hit) return hit;
+  const meta = await fetchMplTokenMetadataNameSymbol(connection, mintPk);
+  setCached(metadataCache, key, meta, getTtlMs("TREASURY_METADATA_CACHE_MS", 60 * 60 * 1000));
+  return meta;
 }
 
 function decodeWhirlpoolAccount(dataBuf) {
@@ -188,25 +237,25 @@ async function fetchWhirlpoolPoolFromRpc(connection, poolAddressStr) {
   let metaA;
   let metaB;
   if (st > 0) {
-    mintAInfo = await getMint(connection, wh.tokenMintA);
+    mintAInfo = await getMintCached(connection, wh.tokenMintA);
     await gap();
-    mintBInfo = await getMint(connection, wh.tokenMintB);
+    mintBInfo = await getMintCached(connection, wh.tokenMintB);
     await gap();
     balARes = await connection.getTokenAccountBalance(wh.tokenVaultA).catch(() => null);
     await gap();
     balBRes = await connection.getTokenAccountBalance(wh.tokenVaultB).catch(() => null);
     await gap();
-    metaA = await fetchMplTokenMetadataNameSymbol(connection, wh.tokenMintA);
+    metaA = await getMetadataCached(connection, wh.tokenMintA);
     await gap();
-    metaB = await fetchMplTokenMetadataNameSymbol(connection, wh.tokenMintB);
+    metaB = await getMetadataCached(connection, wh.tokenMintB);
   } else {
     [mintAInfo, mintBInfo, balARes, balBRes, metaA, metaB] = await Promise.all([
-      getMint(connection, wh.tokenMintA),
-      getMint(connection, wh.tokenMintB),
+      getMintCached(connection, wh.tokenMintA),
+      getMintCached(connection, wh.tokenMintB),
       connection.getTokenAccountBalance(wh.tokenVaultA).catch(() => null),
       connection.getTokenAccountBalance(wh.tokenVaultB).catch(() => null),
-      fetchMplTokenMetadataNameSymbol(connection, wh.tokenMintA),
-      fetchMplTokenMetadataNameSymbol(connection, wh.tokenMintB),
+      getMetadataCached(connection, wh.tokenMintA),
+      getMetadataCached(connection, wh.tokenMintB),
     ]);
   }
 
@@ -317,6 +366,15 @@ export async function treasuryPoolInfo(args, env = {}) {
     };
   }
 
+  const poolCacheMs = getTtlMs("TREASURY_POOL_INFO_CACHE_MS", 12_000);
+  const cached = getCached(poolInfoCache, poolAddr);
+  if (cached) {
+    return {
+      ...cached,
+      cache: { hit: true, ttl_ms: poolCacheMs },
+    };
+  }
+
   const proxyBase = String(
     args?.orca_proxy_base_url ?? process.env.SOLANAAGENT_ORCA_API_BASE ?? ""
   ).replace(/\/$/, "");
@@ -335,13 +393,15 @@ export async function treasuryPoolInfo(args, env = {}) {
       const fr = await tryFetchJson(url);
       if (fr.parsed && hasOrcaPoolPayload(fr.parsed)) {
         const d = enrichOrcaData(fr.parsed.data);
-        return {
+        const result = {
           ok: true,
           pool_address: poolAddr,
           pool_data_source: d.poolDataSource || "orca_proxy",
           data: d,
           agent_report: buildAgentReport(poolAddr, d),
         };
+        setCached(poolInfoCache, poolAddr, result, poolCacheMs);
+        return result;
       }
     } catch {
       /* fall through */
@@ -353,13 +413,15 @@ export async function treasuryPoolInfo(args, env = {}) {
     const fr = await tryFetchJson(orcaUrl);
     if (fr.parsed && hasOrcaPoolPayload(fr.parsed)) {
       const d = enrichOrcaData(fr.parsed.data);
-      return {
+      const result = {
         ok: true,
         pool_address: poolAddr,
         pool_data_source: d.poolDataSource || "orca_api",
         data: d,
         agent_report: buildAgentReport(poolAddr, d),
       };
+      setCached(poolInfoCache, poolAddr, result, poolCacheMs);
+      return result;
     }
   } catch {
     /* fall through */
@@ -375,13 +437,15 @@ export async function treasuryPoolInfo(args, env = {}) {
     };
   }
 
-  return {
+  const result = {
     ok: true,
     pool_address: poolAddr,
     pool_data_source: "solana_rpc",
     data: rpc.data,
     agent_report: buildAgentReport(poolAddr, rpc.data),
   };
+  setCached(poolInfoCache, poolAddr, result, poolCacheMs);
+  return result;
 }
 
 function buildAgentReport(poolAddr, d) {

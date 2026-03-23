@@ -17,12 +17,22 @@ trap cleanup EXIT INT TERM
 echo "Building renderer..."
 npm run build:renderer
 
+if lsof -nP -iTCP:3333 -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "Port 3333 is already in use. Stop the existing server first, then rerun."
+  lsof -nP -iTCP:3333 -sTCP:LISTEN || true
+  exit 1
+fi
+
 echo "Starting server..."
 node server.js &
 SERVER_PID=$!
 
 READY=""
 for _ in $(seq 1 50); do
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "Server process exited before becoming ready."
+    exit 1
+  fi
   if curl -sf "http://127.0.0.1:3333/api/help" >/dev/null 2>&1; then
     READY="http://127.0.0.1:3333"
     break

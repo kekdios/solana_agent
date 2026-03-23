@@ -3,7 +3,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { join, extname, dirname } from "path";
 import { fileURLToPath } from "url";
 import { randomBytes, createCipheriv, createDecipheriv, randomUUID, createHash } from "crypto";
-import { Keypair, Connection, PublicKey, Transaction, SystemProgram } from "@solana/web3.js";
+import { Keypair, Connection, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 import yaml from "js-yaml";
 import * as db from "./db.js";
@@ -21,15 +21,12 @@ import * as docCrawlModule from "./tools/doc-crawl.js";
 import * as docIndexModule from "./tools/doc-index.js";
 import * as docSearchModule from "./tools/doc-search.js";
 import * as readDocsFolderModule from "./tools/read-docs-folder.js";
+import { nostrAction as nostrActionDirect, fetchAgentKind1111Posts } from "./tools/nostr-action.js";
 import * as solana from "./tools/solana.js";
 import * as treasuryPool from "./tools/treasury-pool-swap.js";
 import { treasuryPoolInfo } from "./tools/treasury-pool-info.js";
 import { hyperliquidPerpMids } from "./tools/hyperliquid-price.js";
 import * as jupiter from "./tools/jupiter.js";
-import * as drift from "./tools/drift.js";
-import * as kamino from "./tools/kamino.js";
-import * as raydium from "./tools/raydium.js";
-import * as bet from "./tools/bet.js";
 import * as execModule from "./tools/exec.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -37,7 +34,7 @@ const INCEPTION_API = "https://api.inceptionlabs.ai/v1/chat/completions";
 const VENICE_API = "https://api.venice.ai/api/v1/chat/completions";
 const NANOGPT_API = "https://nano-gpt.com/api/v1/chat/completions";
 /** Injected into the first-turn system message (concatenated, in order). Keep lean; full repo TOOLS.md is separate. */
-const WORKSPACE_FILES = ["SOUL.md", "AGENTS.md", "tools.md", "skills/clawstr/SKILLS.md"];
+const WORKSPACE_FILES = ["SOUL.md", "AGENTS.md", "tools.md", "skills/nostr/SKILLS.md"];
 
 /** Jupiter swap program ID (mainnet). Used to detect Jupiter transactions vs spam/other. */
 const JUPITER_PROGRAM_ID = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
@@ -264,7 +261,7 @@ const PARAM_SCHEMAS = {
       orca_proxy_base_url: {
         type: "string",
         description:
-          "Optional same-origin-style base e.g. https://www.solanaagent.app/api — tries GET /orca/pool/{address} first (matches website).",
+          "Optional HTTP base URL for an Orca pool JSON proxy; if set, tries GET {base}/orca/pool/{address} before on-chain reads.",
       },
     },
     required: [],
@@ -376,92 +373,24 @@ const PARAM_SCHEMAS = {
     },
     required: ["amount"],
   },
-  drift_perp_price: {
-    type: "object",
-    properties: { market_index: { type: "number", description: "Perp market index (default 0 = SOL)" } },
-    required: [],
-  },
-  drift_positions: { type: "object", properties: {} },
-  drift_place_order: {
-    type: "object",
-    properties: {
-      market_index: { type: "number" },
-      direction: { type: "string" },
-      base_asset_amount: { type: "string" },
-      price: { type: "number" },
-    },
-    required: [],
-  },
-  kamino_health: { type: "object", properties: {} },
-  kamino_positions: { type: "object", properties: {} },
-  kamino_deposit: {
-    type: "object",
-    properties: { amount: { type: "string" }, mint: { type: "string" } },
-    required: [],
-  },
-  raydium_quote: {
-    type: "object",
-    properties: { input_mint: { type: "string" }, output_mint: { type: "string" }, amount: { type: "string" } },
-    required: [],
-  },
-  raydium_market_detect: {
-    type: "object",
-    properties: { mint: { type: "string" } },
-    required: [],
-  },
-  bet_markets: { type: "object", properties: {} },
-  bet_positions: { type: "object", properties: {} },
   get_swap_settings: { type: "object", properties: {}, required: [] },
   clear_expired_swap_intents: { type: "object", properties: {}, required: [] },
-  bulletin_create_payment_intent: {
+  nostr_action: {
     type: "object",
     properties: {
-      wallet_address: { type: "string", description: "Optional wallet address; defaults to app wallet in Settings." },
-    },
-    required: [],
-  },
-  bulletin_get_latest_intent: { type: "object", properties: {}, required: [] },
-  bulletin_post: {
-    type: "object",
-    properties: {
-      content: {
+      type: {
         type: "string",
         description:
-          "Text to publish on solanaagent.app Clawstr. Uses free agent_code POST only; requires CLAWSTR_AGENT_CODE in Settings or env (./run.sh). No SOL payment.",
+          "Action type: publish | read | reply | react | profile.",
       },
-      wallet_address: {
-        type: "string",
-        description: "Ignored for bulletin_post (free mode). Kept for schema compatibility.",
+      payload: {
+        type: "object",
+        description:
+          "Strict payload shape depends on type. publish: {content}. read: {scope: feed|public_feed|communities|health|public_health, limit?, ai_only?}.",
       },
     },
-    required: ["content"],
+    required: ["type", "payload"],
   },
-  bulletin_approve_and_post: {
-    type: "object",
-    properties: {
-      content: { type: "string", description: "Same as bulletin_post (alias)." },
-      wallet_address: { type: "string", description: "Ignored; same as bulletin_post." },
-    },
-    required: ["content"],
-  },
-  clawstr_health: { type: "object", properties: {}, required: [] },
-  clawstr_feed: {
-    type: "object",
-    properties: {
-      limit: { type: "integer", description: "Max posts (default 30, max 100)." },
-      ai_only: { type: "boolean", description: "If true, only posts with Clawstr NIP-32 AI tags." },
-    },
-    required: [],
-  },
-  clawstr_communities: { type: "object", properties: {}, required: [] },
-  bulletin_public_feed: {
-    type: "object",
-    properties: {
-      limit: { type: "integer", description: "Max entries (default 30, max 100)." },
-    },
-    required: [],
-  },
-  bulletin_public_health: { type: "object", properties: {}, required: [] },
 };
 
 function loadToolRegistry() {
@@ -516,6 +445,16 @@ function toolAllowedByTier(tier, name, args) {
       return false;
   }
 
+  // Unified Nostr gateway: read scopes at Tier 1, mutating actions Tier 2+.
+  if (name === "nostr_action") {
+    const type = String(args?.type || "")
+      .trim()
+      .toLowerCase();
+    if (type === "read") return true;
+    if (t === 1) return false;
+    return true;
+  }
+
   // Always-OK: inspect/read-only tools (no writes, no external side effects).
   const alwaysAllow = new Set([
     "browse",
@@ -523,12 +462,7 @@ function toolAllowedByTier(tier, name, args) {
     "get_btc_price",
     "get_swap_settings",
     "clear_expired_swap_intents",
-    "bulletin_get_latest_intent",
-    "clawstr_health",
-    "clawstr_feed",
-    "clawstr_communities",
-    "bulletin_public_feed",
-    "bulletin_public_health",
+    "feed",
     "conversation_search",
     "file_list",
     "file_read",
@@ -548,19 +482,8 @@ function toolAllowedByTier(tier, name, args) {
     "jupiter_quote",
     "hyperliquid_price",
     "treasury_pool_info",
-    "drift_perp_price",
-    "drift_positions",
-    "kamino_health",
-    "kamino_positions",
-    "raydium_quote",
-    "raydium_market_detect",
-    "bet_markets",
-    "bet_positions",
   ]);
   if (alwaysAllow.has(name)) return true;
-
-  // solanaagent.app Clawstr posting (bulletin_post, bulletin_approve_and_post): no extra tier gate—same as other
-  // non-swap tools (Tier 2+ can run HTTP-side-effect tools; Tier 1 remains read-only).
 
   // Swap execution flow is Tier 4 only (sovereign funds movement capability).
   if (
@@ -721,54 +644,12 @@ async function runTool(name, args, env) {
         return await executeJupiterSwapIntent(args, env);
       case "sovereign_transaction":
         return await runSovereignTransaction(args, env);
-      case "drift_perp_price":
-        return await drift.driftPerpPrice(args, env);
-      case "drift_positions":
-        return await drift.driftPositions(args, env);
-      case "drift_place_order":
-        return await drift.driftPlaceOrder(args, env);
-      case "kamino_health":
-        return await kamino.kaminoHealth(args, env);
-      case "kamino_positions":
-        return await kamino.kaminoPositions(args, env);
-      case "kamino_deposit":
-        return await kamino.kaminoDeposit(args, env);
-      case "raydium_quote":
-        return await raydium.raydiumQuote(args, env);
-      case "raydium_market_detect":
-        return await raydium.raydiumMarketDetect(args, env);
-      case "bet_markets":
-        return await bet.betMarkets(args, env);
-      case "bet_positions":
-        return await bet.betPositions(args, env);
       case "get_swap_settings":
         return getSwapSettings();
       case "clear_expired_swap_intents":
         return db.clearExpiredSwapIntents();
-      case "bulletin_create_payment_intent": {
-        const walletAddress = (args?.wallet_address || getSolanaPublicKeyFromConfig() || "").trim();
-        if (!walletAddress) return { ok: false, error: "wallet_address is required (or configure app wallet in Settings)." };
-        const out = await bulletinCreatePaymentIntent(walletAddress);
-        if (out.ok && out.data?.payment_intent && out.data?.payment) {
-          latestBulletinIntent = { payment_intent: out.data.payment_intent, payment: out.data.payment };
-        }
-        return out.ok ? out.data : { ok: false, status: out.status, ...(out.data || {}) };
-      }
-      case "bulletin_get_latest_intent":
-        return { ok: true, latest: latestBulletinIntent };
-      case "bulletin_post":
-      case "bulletin_approve_and_post":
-        return await runBulletinAutonomousPostCore(args, env);
-      case "clawstr_health":
-        return await toolClawstrHealth();
-      case "clawstr_feed":
-        return await toolClawstrFeed(args);
-      case "clawstr_communities":
-        return await toolClawstrCommunities();
-      case "bulletin_public_feed":
-        return await toolBulletinPublicFeed(args);
-      case "bulletin_public_health":
-        return await toolBulletinPublicHealth();
+      case "nostr_action":
+        return await nostrActionDirect(args, env);
       // Redirect legacy EVM-style names to Solana (app is Solana-only)
       case "account_balance":
         return await solana.solanaBalance(args, {
@@ -1392,9 +1273,6 @@ function inferToolMode(name, result) {
   if (result?.dry_run === true) return "simulated";
   if (result?.broadcast === false) return "simulated";
   if (msg.includes("dry_run") || msg.includes("simulated") || msg.includes("stub")) return "simulated";
-  if (["drift_place_order", "kamino_deposit", "raydium_quote", "raydium_market_detect", "bet_markets", "bet_positions"].includes(name)) {
-    return "simulated";
-  }
   return "live";
 }
 
@@ -1541,36 +1419,38 @@ function getEncryptionKey() {
 }
 
 function encrypt(plaintext) {
-  const key = getEncryptionKey();
-  if (!key || key.length !== KEY_LEN) return null;
-  const iv = randomBytes(IV_LEN);
-  const cipher = createCipheriv(ALG, key, iv, { authTagLength: TAG_LEN });
-  const enc = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return Buffer.concat([iv, tag, enc]).toString("base64");
+  // Config table encryption removed; persist plaintext to .env-backed config.
+  return String(plaintext ?? "");
 }
 
 function decrypt(ciphertextB64) {
   const key = getEncryptionKey();
-  if (!key || key.length !== KEY_LEN) return null;
-  const buf = Buffer.from(ciphertextB64, "base64");
-  if (buf.length < IV_LEN + TAG_LEN) return null;
-  const iv = buf.subarray(0, IV_LEN);
-  const tag = buf.subarray(IV_LEN, IV_LEN + TAG_LEN);
-  const enc = buf.subarray(IV_LEN + TAG_LEN);
-  const decipher = createDecipheriv(ALG, key, iv, { authTagLength: TAG_LEN });
-  decipher.setAuthTag(tag);
-  return decipher.update(enc) + decipher.final("utf8");
+  if (!key || key.length !== KEY_LEN) return String(ciphertextB64 ?? "");
+  try {
+    const buf = Buffer.from(String(ciphertextB64 ?? ""), "base64");
+    if (buf.length < IV_LEN + TAG_LEN) return String(ciphertextB64 ?? "");
+    const iv = buf.subarray(0, IV_LEN);
+    const tag = buf.subarray(IV_LEN, IV_LEN + TAG_LEN);
+    const enc = buf.subarray(IV_LEN + TAG_LEN);
+    const decipher = createDecipheriv(ALG, key, iv, { authTagLength: TAG_LEN });
+    decipher.setAuthTag(tag);
+    return decipher.update(enc) + decipher.final("utf8");
+  } catch {
+    return String(ciphertextB64 ?? "");
+  }
 }
 
-/** Load a config value: config table (solagent.db) is sole source of truth; env is fallback only when not in DB. */
+/** Load config value from .env-backed db.getConfig; also accepts legacy encrypted payloads. */
 function loadConfigKey(key, envFallback) {
   const stored = db.getConfig(key);
-  if (stored) {
+  if (stored != null) {
+    const raw = String(stored).trim();
+    if (raw === "") return envFallback ?? null;
     try {
-      const dec = decrypt(stored);
+      const dec = decrypt(raw);
       if (dec != null && dec.trim() !== "") return dec.trim();
     } catch (_) {}
+    return raw;
   }
   return envFallback ?? null;
 }
@@ -1844,13 +1724,26 @@ function getSolanaNetworkFromRpc(url) {
   return "custom";
 }
 
-// Env-style vars: config table only. process.env used when the host sets PORT etc. before startup. No .env fallback.
+function normalizeHeartbeatSeconds(raw) {
+  const n = Number(String(raw ?? "").trim());
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  // Backward compatibility: if a legacy value looks like milliseconds, convert to seconds.
+  if (n >= 100000) return Math.max(0, Math.round(n / 1000));
+  return Math.max(0, Math.round(n));
+}
+
+// Env-style vars from .env-backed config.
 // Use let so POST /api/config can update them; GET then returns current values without restart.
 let configPort = loadConfigKey("PORT") ?? process.env.PORT;
 let configHost = loadConfigKey("HOST") ?? process.env.HOST;
 let configSolanaRpc = loadConfigKey("SOLANA_RPC_URL") ?? process.env.SOLANA_RPC_URL;
 if (!configSolanaRpc || !configSolanaRpc.trim()) configSolanaRpc = DEFAULT_SOLANA_RPC;
-let configHeartbeatMs = loadConfigKey("HEARTBEAT_INTERVAL_MS") ?? process.env.HEARTBEAT_INTERVAL_MS;
+let configHeartbeatSeconds = normalizeHeartbeatSeconds(
+  loadConfigKey("HEARTBEAT_INTERVAL_SECONDS") ??
+    process.env.HEARTBEAT_INTERVAL_SECONDS ??
+    loadConfigKey("HEARTBEAT_INTERVAL_MS") ??
+    process.env.HEARTBEAT_INTERVAL_MS
+);
 let configWorkspaceDir = loadConfigKey("WORKSPACE_DIR") ?? process.env.WORKSPACE_DIR;
 let configDataDir = loadConfigKey("DATA_DIR") ?? process.env.DATA_DIR;
 let configSolanaRpcPaceMs = loadConfigKey("SOLANA_RPC_PACE_MS") ?? process.env.SOLANA_RPC_PACE_MS ?? "";
@@ -1866,8 +1759,8 @@ if (jupiterApiKey) process.env.JUPITER_API_KEY = jupiterApiKey;
 let port = Number(configPort) || 3333;
 /** Resolved server host (config > env > default). */
 let host = (configHost && String(configHost).trim()) || "0.0.0.0";
-/** Resolved heartbeat interval ms (config > env; 0 = disabled). */
-let heartbeatIntervalMs = configHeartbeatMs ? Number(configHeartbeatMs) : 0;
+/** Resolved heartbeat interval ms (stored in config as seconds; 0 = disabled). */
+let heartbeatIntervalMs = configHeartbeatSeconds > 0 ? configHeartbeatSeconds * 1000 : 0;
 
 /** Returns { url, model, apiKey } for the current chat backend. */
 function getChatBackendConfig() {
@@ -1881,435 +1774,37 @@ function getChatBackendConfig() {
 }
 
 function getSolanaKeypairFromConfig() {
-  const privStored = db.getConfig("SOLANA_PRIVATE_KEY");
-  if (!privStored) return null;
-  try {
-    const dec = decrypt(privStored);
-    if (!dec || !dec.trim()) return null;
-    return { privateKeyBase58: dec.trim() };
-  } catch (_) {}
-  return null;
+  const dec = loadConfigKey("SOLANA_PRIVATE_KEY");
+  if (!dec || !String(dec).trim()) return null;
+  return { privateKeyBase58: String(dec).trim() };
 }
 
 function getSolanaPublicKeyFromConfig() {
-  const stored = db.getConfig("SOLANA_PUBLIC_KEY");
-  if (!stored) return null;
-  try {
-    const dec = decrypt(stored);
-    if (dec && dec.trim()) return dec.trim();
-  } catch (_) {}
-  return null;
-}
-
-function getBulletinBaseUrl() {
-  const fromConfig = loadConfigKey("BULLETIN_BASE_URL");
-  const url = (fromConfig || process.env.BULLETIN_BASE_URL || "https://www.solanaagent.app").trim();
-  return url.replace(/\/+$/, "");
-}
-
-/** Free Clawstr posts: config table or process.env (e.g. ./run.sh sources .env). */
-function getClawstrAgentCode() {
-  const v = loadConfigKey("CLAWSTR_AGENT_CODE", process.env.CLAWSTR_AGENT_CODE);
-  if (!v || !String(v).trim()) return "";
-  return String(v).trim();
-}
-
-let latestBulletinIntent = null;
-
-async function bulletinCreatePaymentIntent(walletAddress) {
-  const base = getBulletinBaseUrl();
-  const r = await fetch(`${base}/api/v1/bulletin/payment-intent`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ wallet_address: walletAddress }),
-    signal: AbortSignal.timeout(12000),
-  });
-  const data = await r.json().catch(() => ({}));
-  return { ok: r.ok, status: r.status, data };
-}
-
-/** Turn simulation "insufficient lamports X, need Y" into a short funding hint for the UI. */
-function appendInsufficientLamportsHint(message) {
-  const m = String(message);
-  const match = m.match(/insufficient lamports (\d+), need (\d+)/);
-  if (!match) return m;
-  const haveSol = (Number(match[1]) / 1e9).toFixed(6);
-  const needSol = (Number(match[2]) / 1e9).toFixed(6);
-  return (
-    `${m}\n\n` +
-    `Not enough SOL: your app wallet has ~${haveSol} SOL but this bulletin payment needs ~${needSol} SOL (plus a small amount for network fees). ` +
-    `Send SOL to this wallet in Settings → Solana Wallet (same network as your RPC), then try Pay & post again.`
-  );
-}
-
-async function sendSolTransferWithMemo({ to, lamports, memo }) {
-  const kpCfg = getSolanaKeypairFromConfig();
-  if (!kpCfg?.privateKeyBase58) return { ok: false, error: "Solana wallet not configured in Settings." };
-  let keypair;
-  try {
-    const bytes = bs58.decode(kpCfg.privateKeyBase58);
-    keypair = Keypair.fromSecretKey(bytes);
-  } catch (e) {
-    return { ok: false, error: `Failed to decode configured wallet private key: ${e.message || String(e)}` };
-  }
-  try {
-    const rpcUrl = configSolanaRpc || process.env.SOLANA_RPC_URL || DEFAULT_SOLANA_RPC;
-    const conn = new Connection(rpcUrl, { commitment: "confirmed" });
-    const tx = new Transaction();
-    tx.add(
-      SystemProgram.transfer({
-        fromPubkey: keypair.publicKey,
-        toPubkey: new PublicKey(String(to).trim()),
-        lamports: Number(lamports),
-      })
-    );
-    if (memo && String(memo).trim()) {
-      tx.add({
-        keys: [],
-        programId: new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
-        data: Buffer.from(String(memo), "utf8"),
-      });
-    }
-    const sig = await conn.sendTransaction(tx, [keypair], {
-      skipPreflight: false,
-      preflightCommitment: "confirmed",
-      maxRetries: 3,
-    });
-    const conf = await conn.confirmTransaction(sig, "confirmed");
-    if (conf.value?.err) {
-      return { ok: false, error: `Transaction failed: ${JSON.stringify(conf.value.err)}`, signature: sig };
-    }
-    return { ok: true, signature: sig };
-  } catch (e) {
-    return { ok: false, error: appendInsufficientLamportsHint(e.message || String(e)) };
-  }
-}
-
-async function bulletinCreatePost(payment_intent_id, content, tx_signature) {
-  const base = getBulletinBaseUrl();
-  const payload = { payment_intent_id, content };
-  const sig = (tx_signature && String(tx_signature).trim()) || "";
-  if (sig) payload.tx_signature = sig;
-  const r = await fetch(`${base}/api/v1/bulletin/post`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(12000),
-  });
-  const data = await r.json().catch(() => ({}));
-  return { ok: r.ok, status: r.status, data };
-}
-
-/** Free agent post: POST body { agent_code, content } — no SOL transfer (see site API). */
-async function bulletinCreatePostWithAgentCode(agentCode, content) {
-  const base = getBulletinBaseUrl();
-  const r = await fetch(`${base}/api/v1/bulletin/post`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      agent_code: String(agentCode).trim(),
-      content: String(content).trim(),
-    }),
-    signal: AbortSignal.timeout(12000),
-  });
-  const data = await r.json().catch(() => ({}));
-  return { ok: r.ok, status: r.status, data };
-}
-
-/** Short plain-text excerpt for agent-facing previews. */
-function agentTextExcerpt(s, n = 240) {
-  const t = String(s ?? "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!t) return "";
-  return t.length <= n ? t : `${t.slice(0, n)}…`;
-}
-
-/** GET JSON from solanaagent.app (or BULLETIN_BASE_URL). Path must start with /. */
-async function fetchSolanaAgentRead(path, searchParams = {}) {
-  const base = getBulletinBaseUrl();
-  const pathNorm = path.startsWith("/") ? path : `/${path}`;
-  const u = new URL(pathNorm, `${base}/`);
-  for (const [k, v] of Object.entries(searchParams)) {
-    if (v === undefined || v === null || v === "") continue;
-    u.searchParams.set(k, String(v));
-  }
-  const r = await fetch(u.toString(), { method: "GET", signal: AbortSignal.timeout(15000) });
-  const text = await r.text();
-  let data = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { _non_json: true, body_preview: text.slice(0, 500) };
-  }
-  return { httpOk: r.ok, status: r.status, path: u.pathname + u.search, request_url: u.toString(), data };
-}
-
-async function toolClawstrHealth() {
-  const res = await fetchSolanaAgentRead("/api/v1/clawstr/health");
-  if (!res.httpOk) {
-    const err = res.data?.error || res.data?.message || `HTTP ${res.status}`;
-    return {
-      ok: false,
-      error: err,
-      agent_report: `**Clawstr health** — request failed (${res.status}). ${err}`,
-      endpoint: res.path,
-      request_url: res.request_url,
-    };
-  }
-  const d = res.data || {};
-  const signing =
-    d.signing_configured === true
-      ? "Relay signing is **configured**."
-      : d.signing_configured === false
-        ? "Relay signing is **not** configured on the server."
-        : "Signing status not specified.";
-  const npub = d.npub || d.public_npub || null;
-  const sub = d.subclaw_url || d.subclaw || d.url || null;
-  return {
-    ok: true,
-    agent_report:
-      `**Clawstr (Nostr · solanaagent subclaw)** — ${signing}` +
-      (npub ? `\n- **npub:** \`${npub}\`` : "") +
-      (sub ? `\n- **Subclaw / bridge:** ${sub}` : "") +
-      `\n- Docs: [solanaagent.app API — Clawstr](https://www.solanaagent.app/api.html)`,
-    summary: {
-      signing_configured: d.signing_configured,
-      npub,
-      subclaw_url: sub,
-    },
-    endpoint: res.path,
-  };
-}
-
-async function toolClawstrFeed(args) {
-  const limit = Math.min(100, Math.max(1, Number(args?.limit) || 30));
-  const aiOnly = args?.ai_only === true || args?.ai_only === "true" || args?.ai_only === 1;
-  const q = { limit: String(limit) };
-  if (aiOnly) q.ai_only = "1";
-  const res = await fetchSolanaAgentRead("/api/v1/clawstr/feed", q);
-  if (!res.httpOk) {
-    const err = res.data?.error || res.data?.message || `HTTP ${res.status}`;
-    return {
-      ok: false,
-      error: err,
-      agent_report: `**Clawstr feed** — could not load (${res.status}). ${err}`,
-      endpoint: res.path,
-    };
-  }
-  const d = res.data || {};
-  const posts = Array.isArray(d.posts)
-    ? d.posts
-    : Array.isArray(d.items)
-      ? d.items
-      : Array.isArray(d.results)
-        ? d.results
-        : Array.isArray(d)
-          ? d
-          : [];
-  const previews = posts.slice(0, 25).map((p, i) => {
-    const body = p.content || p.text || p.body || p.message || "";
-    return {
-      n: i + 1,
-      id: p.id || p.event_id || p.eventId || p.nostr_event_id || null,
-      created_at: p.created_at || p.createdAt || p.ts || null,
-      excerpt: agentTextExcerpt(body, 200),
-    };
-  });
-  const lines = previews.filter((p) => p.excerpt || p.id).map((p) => {
-    const head = p.id ? `**${p.n}.** \`${p.id}\`` : `**${p.n}.**`;
-    const tail = p.created_at ? ` _(${p.created_at})_` : "";
-    return `${head}${tail}${p.excerpt ? ` — ${p.excerpt}` : ""}`;
-  });
-  const report =
-    `**Clawstr feed** — **${posts.length}** post(s) (limit=${limit}, ai_only=${aiOnly}).` +
-    (lines.length ? `\n\n${lines.join("\n")}` : "\n\n_(No post bodies parsed in this response; try a smaller limit or check the API directly.)_") +
-    `\n\n_Source: [API reference](https://www.solanaagent.app/api.html)_`;
-  return {
-    ok: true,
-    agent_report: report,
-    summary: { total_returned: posts.length, limit, ai_only: aiOnly, preview_count: previews.length },
-    posts_preview: previews,
-    endpoint: res.path,
-  };
-}
-
-async function toolClawstrCommunities() {
-  const res = await fetchSolanaAgentRead("/api/v1/clawstr/communities");
-  if (!res.httpOk) {
-    const err = res.data?.error || res.data?.message || `HTTP ${res.status}`;
-    return { ok: false, error: err, agent_report: `**Clawstr communities** — failed (${res.status}). ${err}`, endpoint: res.path };
-  }
-  const d = res.data || {};
-  const list = Array.isArray(d.communities)
-    ? d.communities
-    : Array.isArray(d.items)
-      ? d.items
-      : Array.isArray(d)
-        ? d
-        : [];
-  const lines = list.slice(0, 40).map((c, i) => {
-    const name = c.name || c.title || c.slug || c.id || `item ${i + 1}`;
-    const url = c.url || c.href || c.link || "";
-    return url ? `- **${name}** — ${url}` : `- **${name}**`;
-  });
-  return {
-    ok: true,
-    agent_report:
-      `**Clawstr communities** — **${list.length}** entr${list.length === 1 ? "y" : "ies"} (curated list for solanaagent.app).\n\n` +
-      (lines.length ? lines.join("\n") : "_(Empty or unrecognized list shape.)_") +
-      `\n\n_Source: [API](https://www.solanaagent.app/api.html)_`,
-    summary: { count: list.length },
-    endpoint: res.path,
-  };
-}
-
-async function toolBulletinPublicFeed(args) {
-  const limit = Math.min(100, Math.max(1, Number(args?.limit) || 30));
-  const res = await fetchSolanaAgentRead("/api/v1/bulletin/feed", { limit: String(limit) });
-  if (!res.httpOk) {
-    const err = res.data?.error || res.data?.message || `HTTP ${res.status}`;
-    return {
-      ok: false,
-      error: err,
-      agent_report: `**solanaagent.app public feed (read-only)** — failed (${res.status}). ${err}`,
-      endpoint: res.path,
-    };
-  }
-  const d = res.data || {};
-  const posts = Array.isArray(d.posts)
-    ? d.posts
-    : Array.isArray(d.items)
-      ? d.items
-      : Array.isArray(d)
-        ? d
-        : [];
-  const previews = posts.slice(0, 25).map((p, i) => {
-    const body = p.content || p.text || p.body || "";
-    return {
-      n: i + 1,
-      id: p.id || p.post_id || p.nostr_event_id || null,
-      status: p.status || null,
-      excerpt: agentTextExcerpt(body, 200),
-    };
-  });
-  const lines = previews.map((p) => {
-    const st = p.status ? ` [${p.status}]` : "";
-    return `**${p.n}.**${p.id ? ` \`${p.id}\`${st}` : ""}${p.excerpt ? ` — ${p.excerpt}` : ""}`;
-  });
-  return {
-    ok: true,
-    agent_report:
-      `**solanaagent.app public feed** (watch-only) — **${posts.length}** entr${posts.length === 1 ? "y" : "ies"} (limit=${limit}).\n\n` +
-      (lines.length ? lines.join("\n") : "_(No entries parsed.)_") +
-      `\n\n_To publish, use **bulletin_post** (free **agent_code**; set **CLAWSTR_AGENT_CODE** in Settings or .env with ./run.sh)._`,
-    summary: { total_returned: posts.length, limit },
-    posts_preview: previews,
-    endpoint: res.path,
-  };
-}
-
-async function toolBulletinPublicHealth() {
-  const res = await fetchSolanaAgentRead("/api/v1/bulletin/health");
-  if (!res.httpOk) {
-    const err = res.data?.error || res.data?.message || `HTTP ${res.status}`;
-    return {
-      ok: false,
-      error: err,
-      agent_report: `**solanaagent.app feed service health** — failed (${res.status}). ${err}`,
-      endpoint: res.path,
-    };
-  }
-  const d = res.data || {};
-  const bits = [];
-  if (d.status) bits.push(`status: **${d.status}**`);
-  if (d.ok != null) bits.push(`ok: **${d.ok}**`);
-  if (d.version) bits.push(`version: ${d.version}`);
-  const detail = bits.length ? bits.join(" · ") : JSON.stringify(d).slice(0, 280);
-  return {
-    ok: true,
-    agent_report: `**solanaagent.app feed service** — ${detail}\n\n_Source: [API](https://www.solanaagent.app/api.html)_`,
-    summary: d,
-    endpoint: res.path,
-  };
-}
-
-/** Lamports beyond bulletin payment for tx fee + memo (conservative). */
-const BULLETIN_FEE_RESERVE_LAMPORTS = 1_000_000;
-
-async function checkBulletinWalletFunding(amount_lamports, env) {
-  const amt = Number(amount_lamports);
-  if (!Number.isFinite(amt) || amt <= 0) {
-    return { ok: false, stage: "balance", error: "Invalid payment amount for balance check." };
-  }
-  const bal = await solana.solanaBalance({}, env);
-  if (!bal.ok) {
-    return { ok: false, stage: "balance", error: bal.error || "Could not read app wallet balance." };
-  }
-  const need = BigInt(amt) + BigInt(BULLETIN_FEE_RESERVE_LAMPORTS);
-  if (BigInt(bal.lamports) < need) {
-    const needSol = Number(need) / 1e9;
-    return {
-      ok: false,
-      stage: "balance",
-      error:
-        `Insufficient SOL for bulletin post: wallet has ${bal.lamports} lamports (~${(bal.lamports / 1e9).toFixed(6)} SOL), ` +
-        `need at least ${need} lamports (~${needSol.toFixed(6)} SOL) = payment ${amt} lamports (~${(amt / 1e9).toFixed(4)} SOL) + fee reserve.`,
-      balance_lamports: bal.lamports,
-      required_lamports: Number(need),
-      payment_lamports: amt,
-    };
-  }
-  return { ok: true, balance_lamports: bal.lamports };
-}
-
-/**
- * Autonomous Clawstr post (solanaagent.app): free agent_code path only.
- * Paid intent + SOL transfer was removed from bulletin_post; use Settings → Clawstr agent code or CLAWSTR_AGENT_CODE in .env (./run.sh).
- * Sidebar /api/bulletin/approve-and-post still supports paid flow for manual one-click.
- */
-async function runBulletinAutonomousPostCore(args, _env) {
-  const content = String(args?.content || "").trim();
-  if (!content) return { ok: false, stage: "validate", error: "content is required" };
-
-  const agentCode = getClawstrAgentCode();
-  if (!agentCode) {
-    return {
-      ok: false,
-      stage: "validate",
-      error:
-        "CLAWSTR_AGENT_CODE is not set. Add it in Settings → Clawstr agent code (stored encrypted), or set CLAWSTR_AGENT_CODE in .env and start the server with ./run.sh. bulletin_post uses the free agent_code API only (no SOL payment).",
-    };
-  }
-
-  const post = await bulletinCreatePostWithAgentCode(agentCode, content);
-  if (!post.ok) {
-    return {
-      ok: false,
-      stage: "post",
-      mode: "agent_code",
-      status: post.status,
-      error: post?.data?.error || post?.data?.message || `Post failed (${post.status})`,
-      error_code: post?.data?.error_code || null,
-      post,
-    };
-  }
-  const nid = post?.data?.post?.nostr_event_id ?? post?.data?.nostr_event_id ?? null;
-  return {
-    ok: true,
-    stage: "posted",
-    mode: "agent_code",
-    tx_signature: null,
-    payment_intent_id: null,
-    nostr_event_id: nid,
-    post,
-  };
+  const dec = loadConfigKey("SOLANA_PUBLIC_KEY");
+  if (!dec || !String(dec).trim()) return null;
+  return String(dec).trim();
 }
 
 const solanaFromConfig = getSolanaKeypairFromConfig();
 if (solanaFromConfig) {
   process.env.SOLANA_PRIVATE_KEY = solanaFromConfig.privateKeyBase58;
 }
+
+/** nostr_action reads NOSTR_* from process.env; .env file is loaded via db.getConfig, not Node's loader. */
+function syncNostrKeysToProcessEnv() {
+  const pairs = [
+    ["NOSTR_NSEC", "NOSTR_NSEC"],
+    ["NOSTR_NPUB", "NOSTR_NPUB"],
+    ["CLAWSTR_NSEC", "CLAWSTR_NSEC"],
+    ["CLAWSTR_NPUB", "CLAWSTR_NPUB"],
+    ["NOSTR_RELAYS", "NOSTR_RELAYS"],
+  ];
+  for (const [cfgKey, envKey] of pairs) {
+    const v = loadConfigKey(cfgKey, process.env[envKey]);
+    if (v != null && String(v).trim() !== "") process.env[envKey] = String(v).trim();
+  }
+}
+syncNostrKeysToProcessEnv();
 
 const INCEPTION_ERRORS = {
   401: {
@@ -2624,8 +2119,6 @@ const server = createServer(async (req, res) => {
       nanogptStatus = "CONNECTED";
       nanogptMasked = masked(nanogptApiKey);
     }
-    const clawstrAgentCode = getClawstrAgentCode();
-    const clawstrAgentMasked = clawstrAgentCode ? masked(clawstrAgentCode) : null;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(
       JSON.stringify({
@@ -2670,10 +2163,6 @@ const server = createServer(async (req, res) => {
             status: jupiterApiKey ? "CONNECTED" : "NOT_CONFIGURED",
             masked: jupiterApiKey ? masked(jupiterApiKey) : null,
           },
-          CLAWSTR_AGENT_CODE: {
-            status: clawstrAgentCode ? "CONFIGURED" : "NOT_CONFIGURED",
-            masked: clawstrAgentMasked,
-          },
           solanaWallet: {
             hasKeypair,
             publicKey: pubKey || null,
@@ -2687,7 +2176,9 @@ const server = createServer(async (req, res) => {
             SOLANA_RPC_URL: configSolanaRpc || "",
             SOLANA_RPC_PACE_MS: String(configSolanaRpcPaceMs ?? "").trim(),
             SOLANA_RPC_STAGGER_MS: String(configSolanaRpcStaggerMs ?? "").trim(),
-            HEARTBEAT_INTERVAL_MS: heartbeatIntervalMs > 0 ? String(heartbeatIntervalMs) : "",
+            HEARTBEAT_INTERVAL_SECONDS: configHeartbeatSeconds > 0 ? String(configHeartbeatSeconds) : "",
+            // Back-compat alias for older clients.
+            HEARTBEAT_INTERVAL_MS: configHeartbeatSeconds > 0 ? String(configHeartbeatSeconds) : "",
             WORKSPACE_DIR: configWorkspaceDir || "",
             DATA_DIR: configDataDir || "",
           },
@@ -3157,111 +2648,15 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  if (path === "/api/bulletin/payment-intent" && req.method === "POST") {
-    let body = "";
-    for await (const chunk of req) body += chunk;
-    try {
-      const parsed = body ? JSON.parse(body) : {};
-      const walletAddress = (parsed?.wallet_address || getSolanaPublicKeyFromConfig() || "").trim();
-      if (!walletAddress) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "wallet_address is required and no app wallet is configured." }));
-        return;
-      }
-      const out = await bulletinCreatePaymentIntent(walletAddress);
-      if (out.ok && out.data?.payment_intent && out.data?.payment) {
-        latestBulletinIntent = {
-          payment_intent: out.data.payment_intent,
-          payment: out.data.payment,
-        };
-      }
-      res.writeHead(out.ok ? 200 : out.status || 500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(out.data || { ok: false, error: "Payment intent failed" }));
-    } catch (e) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: e.message || String(e) }));
-    }
-    return;
-  }
-
-  if (path === "/api/bulletin/payment-intent/latest" && req.method === "GET") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, latest: latestBulletinIntent }));
-    return;
-  }
-
-  if (path === "/api/bulletin/approve-and-post" && req.method === "POST") {
-    let body = "";
-    for await (const chunk of req) body += chunk;
-    try {
-      const parsed = body ? JSON.parse(body) : {};
-      const payment_intent_id = (parsed?.payment_intent_id || "").trim();
-      const treasury_solana_address = (parsed?.treasury_solana_address || "").trim();
-      const amount_lamports = Number(parsed?.amount_lamports || 0);
-      const reference = (parsed?.reference || "").trim();
-      const content = String(parsed?.content || "").trim();
-      if (!payment_intent_id || !treasury_solana_address || !amount_lamports || !reference || !content) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            ok: false,
-            error: "payment_intent_id, treasury_solana_address, amount_lamports, reference, and content are required",
-          })
-        );
-        return;
-      }
-
-      const funding = await checkBulletinWalletFunding(amount_lamports, {});
-      if (!funding.ok) {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, stage: "balance", error: funding.error, ...funding }));
-        return;
-      }
-
-      const transfer = await sendSolTransferWithMemo({
-        to: treasury_solana_address,
-        lamports: amount_lamports,
-        memo: reference,
-      });
-      if (!transfer.ok) {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, stage: "transfer", error: transfer.error, transfer }));
-        return;
-      }
-
-      const post = await bulletinCreatePost(payment_intent_id, content, transfer.signature);
-      if (!post.ok) {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            ok: false,
-            stage: "post",
-            error: post?.data?.error || `Post failed (${post.status})`,
-            transfer,
-            post,
-          })
-        );
-        return;
-      }
-
-      latestBulletinIntent = null;
-
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          ok: true,
-          stage: "posted",
-          payment_intent_id,
-          tx_signature: transfer.signature,
-          nostr_event_id: post?.data?.post?.nostr_event_id || null,
-          transfer,
-          post,
-        })
-      );
-    } catch (e) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: e.message || String(e) }));
-    }
+  if (path.startsWith("/api/bulletin/")) {
+    res.writeHead(410, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        ok: false,
+        code: "REMOVED",
+        error: "Legacy HTTP posting routes were removed. Use nostr_action (direct relays; NOSTR_NSEC for signing).",
+      })
+    );
     return;
   }
   if (path === "/api/config" && req.method === "POST") {
@@ -3335,18 +2730,12 @@ const server = createServer(async (req, res) => {
         }
         jupiterApiKey = value || null;
         if (jupiterApiKey) process.env.JUPITER_API_KEY = jupiterApiKey;
-      } else if (key === "CLAWSTR_AGENT_CODE") {
-        if (value) {
-          const enc = encrypt(value);
-          if (!enc) {
-            res.writeHead(500, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Encryption failed" }));
-            return;
-          }
-          db.setConfig(key, enc);
-        } else {
-          db.setConfig(key, encrypt(""));
-        }
+      } else if (
+        ["CLAWSTR_AGENT_CODE", "BULLETIN_BASE_URL", "BULLETIN_ADMIN_TOKEN"].includes(key)
+      ) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Unsupported configuration key." }));
+        return;
       } else if (key === "CHAT_BACKEND") {
         const v = (value || "").toLowerCase();
         if (v === "venice" || v === "inception" || v === "nanogpt") {
@@ -3379,6 +2768,7 @@ const server = createServer(async (req, res) => {
           "PORT",
           "HOST",
           "SOLANA_RPC_URL",
+          "HEARTBEAT_INTERVAL_SECONDS",
           "HEARTBEAT_INTERVAL_MS",
           "WORKSPACE_DIR",
           "DATA_DIR",
@@ -3402,9 +2792,12 @@ const server = createServer(async (req, res) => {
         } else if (key === "SOLANA_RPC_URL") {
           configSolanaRpc = value;
           if (value) process.env.SOLANA_RPC_URL = value;
-        } else if (key === "HEARTBEAT_INTERVAL_MS") {
-          configHeartbeatMs = value;
-          heartbeatIntervalMs = configHeartbeatMs ? Number(configHeartbeatMs) : 0;
+        } else if (key === "HEARTBEAT_INTERVAL_SECONDS" || key === "HEARTBEAT_INTERVAL_MS") {
+          configHeartbeatSeconds = normalizeHeartbeatSeconds(value);
+          db.setConfig("HEARTBEAT_INTERVAL_SECONDS", String(configHeartbeatSeconds));
+          // Keep alias in sync for older code paths.
+          db.setConfig("HEARTBEAT_INTERVAL_MS", String(configHeartbeatSeconds));
+          heartbeatIntervalMs = configHeartbeatSeconds > 0 ? configHeartbeatSeconds * 1000 : 0;
         } else if (key === "WORKSPACE_DIR") {
           configWorkspaceDir = value;
           if (value) process.env.WORKSPACE_DIR = value;
@@ -3544,22 +2937,22 @@ const server = createServer(async (req, res) => {
       // negatives (e.g. paraphrases about HEARTBEAT.md / file content) so the model
       // sometimes received no tools and falsely claimed it had no filesystem access.
       const sendTools = true;
-      const lastUserContent = (messages.filter((m) => m.role === "user").pop()?.content ?? "").toLowerCase();
-      const suggestsBulletin =
-        /\b(bulletin|clawstr|claw\s*str|solanaagent|paid\s*post|payment_intent|nostr)\b/i.test(lastUserContent);
-      const conversationMentionsBulletin = messages.some((m) =>
-        /\b(bulletin|bulletin_post|clawstr|payment_intent|solanaagent\.app\/api\/v1\/bulletin)/i.test(m.content || "")
+      const lastUserContent = messages.filter((m) => m.role === "user").pop()?.content ?? "";
+      const suggestsNostr =
+        /\b(nostr|nsec|npub|relay|kind\s*1|nip-|nostr_action)\b/i.test(lastUserContent);
+      const conversationMentionsNostr = messages.some((m) =>
+        /\b(nostr_action|nostr\.|#nostr)\b/i.test(m.content || "")
       );
       if (sendTools) {
         const workspaceText = loadWorkspace();
         const walletRule =
           "Wallet: use solana_balance and solana_address only. There are no account_balance or account_address tools—call solana_balance for balance, solana_address for address.\n\n" +
           "**Treasury Orca (`treasury_pool_swap`):** Live swaps are **not** blocked by Settings → Swaps **`SWAPS_EXECUTION_ENABLED`** or **`SWAPS_ENABLED`** (Jupiter-only gates). If a `treasury_pool_swap` tool message lacks **`_treasury_swap_server`**, it is not from this server—do not invent errors like EXECUTION_DISABLED for this tool.\n\n";
-        const bulletinRule =
-          suggestsBulletin || conversationMentionsBulletin
-            ? "solanaagent.app Clawstr: publish with bulletin_post + content using free agent_code (CLAWSTR_AGENT_CODE in Settings or .env / ./run.sh); no SOL in this tool. bulletin_approve_and_post is an alias. bulletin_create_payment_intent / bulletin_get_latest_intent are for sidebar paid flow or inspection, not required for bulletin_post. " +
-              "Read-only public APIs: clawstr_health, clawstr_feed, clawstr_communities, bulletin_public_feed, bulletin_public_health — prefer the tool result field agent_report for user-facing text. " +
-              "The URL https://www.solanaagent.app/api/v1/bulletin/payment-intent requires HTTP POST with JSON {\"wallet_address\":\"<pubkey>\"}; GET and curl without -X POST return 404 and are not a valid health check.\n\n"
+        const nostrRule =
+          suggestsNostr || conversationMentionsNostr
+            ? "**Nostr (direct relays):** use **nostr_action** only. Publish: `{type:'publish', payload:{content}}` (requires **NOSTR_NSEC**). " +
+              "Read: `{type:'read', payload:{scope:'feed'|'public_feed'|'communities'|'health'|'public_health', limit?, ai_only?}}`. " +
+              "Reply / react / profile use the same tool with matching `type` and payload. Prefer **`agent_report`** in the tool result for user-facing text.\n\n"
             : "";
         const reportingRule =
           "Execution reporting contract:\n" +
@@ -3574,12 +2967,12 @@ const server = createServer(async (req, res) => {
           currentMessages = [
             {
               role: "system",
-              content: walletRule + bulletinRule + reportingRule + "Your workspace (read and follow):\n\n" + workspaceText,
+              content: walletRule + nostrRule + reportingRule + "Your workspace (read and follow):\n\n" + workspaceText,
             },
             ...currentMessages,
           ];
         } else {
-          currentMessages = [{ role: "system", content: walletRule + bulletinRule + reportingRule }, ...currentMessages];
+          currentMessages = [{ role: "system", content: walletRule + nostrRule + reportingRule }, ...currentMessages];
         }
       }
 
@@ -3864,6 +3257,24 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (path === "/api/nostr/posts" && req.method === "GET") {
+    try {
+      const u = new URL(req.url || "/", "http://127.0.0.1");
+      const limit = u.searchParams.get("limit");
+      const until = u.searchParams.get("until");
+      const out = await fetchAgentKind1111Posts(process.env, {
+        limit: limit != null && limit !== "" ? Number(limit) : 100,
+        until: until != null && until !== "" ? Number(until) : undefined,
+      });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(out));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }));
+    }
+    return;
+  }
+
   if (path === "/api/usage/total" && req.method === "GET") {
     try {
       const out = db.getTokenUsageTotal();
@@ -4070,18 +3481,6 @@ const server = createServer(async (req, res) => {
     }
     return;
   }
-  if (path === "/api/agent/drift-price" && req.method === "GET") {
-    try {
-      const result = await drift.driftPerpPrice({}, env);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(result));
-    } catch (e) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: String(e.message) }));
-    }
-    return;
-  }
-
   if (path === "/api/restart" && req.method === "POST") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(
