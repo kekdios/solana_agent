@@ -243,7 +243,7 @@ tools:
 
   - name: hyperliquid_price
     description: |
-      **Hyperliquid perp mid prices (USD).** POST `https://api.hyperliquid.xyz/info` with `{ "type": "allMids" }`. Default coins **BTC** and **ETH**; optional **`coins`** array e.g. `["BTC","ETH","SOL"]`. Returns **`mids_usd`** and **`agent_report`**. Use to compare treasury pool implied prices vs CEX-style perp mids—not executable on Solana. Read-only; any tier.
+      **Hyperliquid mid prices (USD)** from `{ "type": "allMids" }`. **`market`**: `"perp"` (default) or **`"spot"`** (pair keys like `@107`, `PURR/USDC`, or base **`HYPE`** when resolvable). Default perp coins **BTC**, **ETH**; default spot **`HYPE`**. Returns **`mids_usd`**, **`resolved`** (spot), **`agent_report`**. Not an executable quote. Read-only; any tier.
     enabled: true
 
   - name: jupiter_quote

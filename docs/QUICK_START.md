@@ -30,7 +30,7 @@ This builds the web UI, starts **`node server.js`**, and opens your browser (def
 Click the **gear icon** (top right) → configure:
 
 - **Chat provider key** (one is required for chat):
-  - **NanoGPT**: `NANOGPT_API_KEY` (default provider)
+  - **NanoGPT**: `NANOGPT_API_KEY` (default provider). After saving the key, pick a **chat model** in Settings (**Refresh** loads the list via your server’s **`GET /api/nanogpt/models`** proxy). Model id is stored as **`NANOGPT_MODEL`** in `.env`.
   - **Inception**: `INCEPTION_API_KEY`
   - **Venice**: `VENICE_ADMIN_KEY`
 

@@ -316,11 +316,17 @@ const PARAM_SCHEMAS = {
   hyperliquid_price: {
     type: "object",
     properties: {
+      market: {
+        type: "string",
+        description:
+          'Optional: "perp" (default) or "spot". Spot uses allMids keys like @107 or PURR/USDC, or base symbols resolvable via spotMeta (e.g. HYPE → @107).',
+        enum: ["perp", "spot"],
+      },
       coins: {
         type: "array",
         items: { type: "string" },
         description:
-          "Optional Hyperliquid perp coin symbols (default [\"BTC\",\"ETH\"]). Examples: SOL, HYPE.",
+          "Optional symbols. Perp (default): BTC, ETH, SOL, … Spot: @107, PURR/USDC, or HYPE when a USDC pair exists. Defaults: perp [BTC,ETH]; spot [HYPE].",
       },
     },
     required: [],

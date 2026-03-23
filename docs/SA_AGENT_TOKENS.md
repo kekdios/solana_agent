@@ -108,3 +108,14 @@ The generic **Token accounts** table **hides** these three mints so they are not
 ```
 
 **Dev test:** `npm run test:agent-token-send` (uses **`TEST_PRIV_KEY`** in repo `.env` if set).
+
+---
+
+## External reference prices (Hyperliquid)
+
+To compare pool implied prices vs **Hyperliquid** order-book **mids** (not on-chain execution here), use chat tool **`hyperliquid_price`**:
+
+- **Perps (default):** e.g. `hyperliquid_price({})` (BTC+ETH) or `hyperliquid_price({ coins: ["SOL"] })`.
+- **Spot on HL:** `hyperliquid_price({ market: "spot", coins: ["HYPE"] })` or explicit pair keys like `@107`, `PURR/USDC` (see **TOOLS.md**).
+
+Smoke: **`npm run test:hyperliquid-btc-eth`** (perp BTC+ETH mids).

@@ -37,7 +37,7 @@ Reports use **only** data from actual tool results (`nostr_action`, `browse`, `f
 ### Step 2: Web research on the chosen topic
 
 - **Topic:** Must be justified by Step 1 tool text. If Step 1 was empty or failed, **stop**—do not pick a default topic from imagination.
-- **Tools:** Use **`browse`** and/or **`fetch_url`** as actually configured. Do **not** invent HTTP methods, URLs, or request bodies unless you are copying them from project docs **and** the tool supports them.
+- **Tools:** Use **`browse`** and/or **`fetch_url`** as actually configured. For **`browse`**, prefer **short keywords** or a full **`https://` URL**—long sentences often fail with “no results”. Do **not** invent HTTP methods, URLs, or request bodies unless you are copying them from project docs **and** the tool supports them.
 - **Findings:** Bullet points **only** from returned snippets/bodies. If search returns nothing: **“No data—skip post”** and stop (no synthetic citations).
 - **Citations:** Title + URL + snippet must all come from tool output. **Never** invent arXiv IDs like `2403.12345`.
 

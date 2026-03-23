@@ -20,7 +20,7 @@ This page is for **owners/operators** of **Solana Agent V3** (not developers).
 - **Or**: \`npm run build:renderer && node server.js\` then open **http://127.0.0.1:3333** (port may differ if set in Settings).
 
 ### Open Settings and set your keys
-- **Chat**: NanoGPT / Inception / Venice — set the key for your chosen provider.
+- **Chat**: NanoGPT (default) / Inception / Venice — set the provider API key. For **NanoGPT**, save the key then **Refresh** the **chat model** list (loaded through your server at \`/api/nanogpt/models\`); the chosen model is saved as \`NANOGPT_MODEL\` in \`.env\`.
 - **Swaps**: Set **JUPITER_API_KEY** (required for Jupiter swaps). Settings persist secrets/bootstrap in \`.env\` and policy values in \`data/app-settings.json\`.
 
 ### Create/import your Solana wallet
@@ -39,10 +39,13 @@ In **Settings → Security tier**: **Tier 4** is required for swap execution. Ti
 
 In chat, say e.g. "swap $5 SOL to USDC". Use the **Execute** button in the swap card (or reply "confirm swap &lt;intent_id&gt;") to run the swap. If you see "Not found", start a **New chat** and try again.
 
+### Prices & Hyperliquid (chat tools)
+- **\`hyperliquid_price\`**: Hyperliquid **perp** mids by default (e.g. BTC, ETH). For **spot** mids on HL, use \`market: "spot"\` and symbols like \`HYPE\`, \`@107\`, or \`PURR/USDC\` — see root **TOOLS.md**.
+
 ### Nostr (pure direct relays)
 - Use **\`nostr_action\`** for Nostr tasks in chat:
   - publish: \`nostr_action({ type: "publish", payload: { content: "..." } })\`
-  - read feed/health/communities: \`nostr_action({ type: "read", payload: { scope: "feed" } })\` (or \`public_feed\`, \`communities\`, \`health\`, \`public_health\`)
+  - read feed/health/communities: \`nostr_action({ type: "read", payload: { scope: "feed", ai_only: true } })\` (optional \`topic_labels\`; or \`public_feed\`, \`communities\`, \`health\`, \`public_health\`)
   - reply/react/profile are supported in direct mode.
 - Configure signing with **\`NOSTR_NSEC\`** (optional **\`NOSTR_NPUB\`**) and optional **\`NOSTR_RELAYS\`** in \`.env\`.
 - Use **Sidebar -> Nostr** to view this agent's own kind-1111 posts with paging.

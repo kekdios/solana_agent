@@ -29,13 +29,13 @@
 | User intent / strategy     | Use these tools |
 | -------------------------- | ---------------- |
 | **Wallet** – address, balance, send SOL/SPL, **native SABTC/SAETH/SAUSD** (balances **`solana_token_balance`** + **`token_symbol`**; send **`solana_agent_token_send`**; **treasury pool read** **`treasury_pool_info`**; **treasury swap** **`treasury_pool_swap`** Orca-only — see **`docs/TREASURY_POOL_TRADING.md`**), tx history/status (wallet **built in**). | `solana_address`, `solana_balance`, `solana_transfer`, `solana_token_balance`, `solana_transfer_spl`, `solana_agent_token_send`, **`treasury_pool_info`**, **`treasury_pool_swap`**, `solana_tx_history`, `solana_tx_status`, `solana_network` |
-| **Swaps / prices** – SOL or token price, swap quote (no execution); Hyperliquid perp mids (BTC/ETH default) | `jupiter_price`, `jupiter_quote`, **`hyperliquid_price`** |
+| **Swaps / prices** – SOL/token USD, swap quote (no execution); Hyperliquid **perp** or **spot** mids | `jupiter_price`, `jupiter_quote`, `get_sol_price_usd`, **`hyperliquid_price`** (`market: "perp"` default; **`market: "spot"`** for HL spot, e.g. `HYPE`, `@107`) |
 | **Docs** – crawl, index, search, read folder | `doc_crawl`, `doc_index`, `doc_search`, `read_docs_folder`, `workspace_read` |
 | **Workspace** – discover and read/write/delete; no hardcoded paths | `workspace_tree` (full tree + file_paths), `workspace_list` (one level), `workspace_read`, `workspace_write`, `workspace_delete` |
 | **Sandbox / exec** – run shell commands in the workspace (create programs with workspace_write, then run them) | `exec` |
 | **Memory** – past conversations | `conversation_search` |
 | **Nostr gateway** – single entrypoint with strict action contracts. Publish/read/reply/react/profile via `type` + `payload`. | `nostr_action` |
-| **Web / API** – browse, fetch URL | `browse`, `fetch_url` |
+| **Web / API** – browse (prefer **short keywords** or full **`https://` URL**), fetch URL | `browse`, `fetch_url` |
 
 ---
 
@@ -80,7 +80,7 @@
 | **Solana**  | `solana_tx_history`   | Recent tx signatures for the app wallet (optional limit).   | `solana_tx_history({ limit: 20 })` |
 | **Solana**  | `solana_tx_status`   | Transaction status by signature.                             | `solana_tx_status({ signature: "…" })` |
 | **Jupiter** | `jupiter_price`      | SOL or token USD price (and optional 24h change).             | `jupiter_price({})` or `jupiter_price({ ids: "SOL" })` |
-| **Hyperliquid** | `hyperliquid_price` | Perp **mid** prices USD via public `info` **allMids** (default **BTC**, **ETH**). Optional **`coins`**. Not on-chain execution. | `hyperliquid_price({})` or `hyperliquid_price({ coins: ["BTC", "ETH", "SOL"] })` |
+| **Hyperliquid** | `hyperliquid_price` | **Perp** or **spot** **mid** USD via `info` **allMids** (`market`: `"perp"` default, **`"spot"`**). Spot: `@107`, `PURR/USDC`, or **`HYPE`** (default spot request). | `hyperliquid_price({ market: "spot", coins: ["HYPE"] })` |
 | **Jupiter** | `jupiter_quote`      | Swap quote (no execution): input/output mint, amount.         | `jupiter_quote({ input_mint: "…", output_mint: "…", amount: "…" })` |
 
 ---
@@ -330,9 +330,9 @@ Use for **price checks** and **swap quotes** (no execution).
 
 ### `hyperliquid_price`
 
-- **Input**: `{ coins? }` – optional array of Hyperliquid **perp** symbols (default **`["BTC","ETH"]`**). Example: `["BTC","ETH","SOL"]`.
-- **Process**: `POST https://api.hyperliquid.xyz/info` with body `{ "type": "allMids" }` ([Hyperliquid info endpoint](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint)).
-- **Output**: `{ ok, mids_usd: { BTC, ETH, … }, mids_raw, agent_report, missing_in_response? }`. **Mid** ≈ (best bid + best ask) / 2; **not** a Solana executable price. Use with **`treasury_pool_info`** to compare external perp mids vs treasury pool implied spot (SABTC/SAETH are not spot BTC/ETH).
+- **Input**: `{ market?, coins? }` – **`market`**: `"perp"` (default) or **`"spot"`**. **Perp** `coins`: symbols like BTC, ETH, SOL (default **`["BTC","ETH"]`**). **Spot** `coins`: Hyperliquid spot pair keys (`@107`, `PURR/USDC`) or a **base** token with a USDC spot market (e.g. **`HYPE`** → `@107`; default spot request **`["HYPE"]`**).
+- **Process**: `POST https://api.hyperliquid.xyz/info` with `{ "type": "allMids" }`; spot name resolution uses `{ "type": "spotMeta" }` once per call ([Hyperliquid info endpoint](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint)).
+- **Output**: `{ ok, market, mids_usd, mids_raw, resolved?, agent_report, missing_in_response? }`. **Mid** is a reference, not an executable on-chain quote.
 
 ### `jupiter_quote`
 

@@ -1,6 +1,6 @@
 # Solana Agent
 
-**Release V3** — `package.json` version **3.0.1**; the web UI sidebar shows **V3** plus semver and date. Local **Node.js HTTP server** + **React** UI with Solana trading tools (balance, transfer, **native SABTC/SAETH/SAUSD** via **`solana_agent_token_send`** + canonical mints for **`solana_token_balance`**, Jupiter price/quote), workspace file tools, and a **sandbox** to create and run programs (exec). Chat can use **NanoGPT** (Grok 4 Fast — default), **Inception** (mercury-2), or **Venice** (venice-uncensored). Choose the provider and set the API key in **Settings**; optional env: `NANOGPT_API_KEY`, `INCEPTION_API_KEY`, `VENICE_ADMIN_KEY`, `CHAT_BACKEND=nanogpt|inception|venice`. Wallet and DeFi tools use the app’s Solana keypair only.
+**Release V3** — `package.json` version **3.0.1**; the web UI sidebar shows **V3** plus semver and date. Local **Node.js HTTP server** + **React** UI with Solana trading tools (balance, transfer, **native SABTC/SAETH/SAUSD** via **`solana_agent_token_send`** + canonical mints for **`solana_token_balance`**, Jupiter price/quote), workspace file tools, and a **sandbox** to create and run programs (exec). Chat can use **NanoGPT** (pick any model from the provider list in **Settings**; default model id in env **`NANOGPT_MODEL`**), **Inception** (mercury-2), or **Venice** (venice-uncensored). Choose the provider, set the API key, and for NanoGPT use **Refresh** on the model list (`GET /api/nanogpt/models` on your server proxies NanoGPT’s models API). Optional env: `NANOGPT_API_KEY`, `NANOGPT_MODEL`, `INCEPTION_API_KEY`, `VENICE_ADMIN_KEY`, `CHAT_BACKEND=nanogpt|inception|venice`. Wallet and DeFi tools use the app’s Solana keypair only.
 
 Run it locally with **`node server.js`** (and a browser). **`./build-and-run.sh`** builds the UI and opens the app. There are no packaged-desktop or auto-update flows in this repo anymore.
 
@@ -19,7 +19,7 @@ This repository runs as a local-first web app (server + renderer in this workspa
    npm install
    ```
 
-2. **Configure in Settings (gear icon):** Set your **NanoGPT API key** (default chat provider), and optionally Inception/Venice keys and **JUPITER_API_KEY** for swaps. Secrets/bootstrap values are maintained in **`.env`**; non-secret maintainable policy keys are stored in **`data/app-settings.json`**. Wallet and **SOLANA_RPC_URL** can be set or imported under Settings → Solana Wallet and Settings → Environment.
+2. **Configure in Settings (gear icon):** Set your **NanoGPT API key** (default chat provider), choose a **NanoGPT chat model** (save key first, then **Refresh** the list), and optionally Inception/Venice keys and **JUPITER_API_KEY** for swaps. Secrets/bootstrap values are maintained in **`.env`**; non-secret maintainable policy keys are stored in **`data/app-settings.json`**. Wallet and **SOLANA_RPC_URL** can be set or imported under Settings → Solana Wallet and Settings → Environment.
 
 3. Run the UI + server (builds `dist-renderer/`, starts Node, opens the browser):
 
@@ -62,6 +62,9 @@ By default, when you run **`node server.js`** from the project root, the DB is a
 - `npm run test:server-start` — spawns `server.js` on a test port and checks `/api/help`.
 - `npm run test:browse` — smoke-test **`browse`** (DDG + Wikipedia fallback; needs network).
 - `npm run test:in-process-server` — starts the server in-process and checks `/api/help` (uses a temp data dir, then removes it).
+- `npm run test:nanogpt-models` — integration check for NanoGPT **`/api/v1/models`** (public + keyed; needs network).
+- `npm run test:hyperliquid-btc-eth` — Hyperliquid **perp** mids for BTC and ETH (needs network).
+- `npm run test:hyperliquid-api-key-price` — requires **`HYPERLIQUID_API_KEY`** in `.env`; fetches **allMids** (see script header: HL info API is public; key is a gate for your smoke test only).
 - `node scripts/test-solana-tools.js` — runs Solana tool handlers (requires wallet in config or, for testing only, `SOLANA_PRIVATE_KEY` in .env; transfer test sends 0.001 SOL to a test address).
 - `npm run test:agent-token-send` — live **`solana_agent_token_send`** smoke test (uses **`TEST_PRIV_KEY`** from repo `.env` if set). See **`docs/SA_AGENT_TOKENS.md`**.
 
@@ -112,7 +115,11 @@ In chat: ask e.g. "swap $5 SOL to USDC". The agent will prepare an intent; use t
 
 The chat uses **OpenAI-compatible tool/function calling** (NanoGPT, Inception, or Venice). **V3:** tools are attached on **every** message. The model can call:
 
-- **browse** – Web search (DuckDuckGo) and fetch first result page; returns title, url, snippet, excerpt.
+- **browse** – Web search (DuckDuckGo + Wikipedia fallback) and fetch first result page; returns title, url, snippet, excerpt. Prefer a **short keyword** or a full **`https://` URL**; long sentences often return no hit.
+- **hyperliquid_price** – Hyperliquid **perp** or **spot** mid USD via public **`allMids`** (`market`: `"perp"` default or **`"spot"`**; spot: e.g. `HYPE`, `@107`, `PURR/USDC`). Reference only—not an executable quote. See **TOOLS.md**.
+- **get_sol_price_usd** – SOL/USD from CoinGecko (same idea as Wallet pricing for “$X in SOL”).
+- **jupiter_quote** / **jupiter_swap_*** – Swap quote and gated execution flow (Tier 4 + Settings → Swaps). See **TOOLS.md**.
+- **treasury_pool_info** / **treasury_pool_swap** – Read Orca Whirlpool for **SABTC/SAETH/SAUSD** pairs; native swap with **`dry_run`**. See **`docs/TREASURY_POOL_TRADING.md`**.
 - **file_write** – Save a file (filename + content); returns file id.
 - **file_read** – Read a file by id.
 - **file_list** – List saved files.

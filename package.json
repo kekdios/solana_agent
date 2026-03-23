@@ -39,6 +39,8 @@
     "test:server-start": "node scripts/test-server-start.js",
     "test:in-process-server": "node scripts/test-in-process-server.js",
     "test:nanogpt-models": "node scripts/test-nanogpt-models.js",
+    "test:hyperliquid-api-key-price": "node scripts/test-hyperliquid-api-key-price.js",
+    "test:hyperliquid-btc-eth": "node scripts/test-hyperliquid-btc-eth.js",
     "inspect:wallet-tokens": "node scripts/inspect-wallet-tokens.js",
     "test:agent-token-send": "node scripts/test-agent-token-send.js",
     "check:treasury-jupiter-routes": "node scripts/check-treasury-jupiter-routes.js",

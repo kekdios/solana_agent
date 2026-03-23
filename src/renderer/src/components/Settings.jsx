@@ -722,16 +722,17 @@ export default function Settings({ onClose }) {
                 <SettingsStoreBadge settingKey="NANOGPT_MODEL" />
               </div>
               <p className="text-xs text-slate-500">
-                Loaded from{" "}
+                List from this app:{" "}
+                <code className="text-slate-400">GET /api/nanogpt/models</code> (proxies NanoGPT’s{" "}
                 <a
                   href="https://docs.nano-gpt.com/api-reference/endpoint/models"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-emerald-400/90 hover:text-emerald-300 underline"
                 >
-                  GET /api/v1/models
+                  /api/v1/models
                 </a>
-                . Save your API key first.
+                ). Save your API key first, then Refresh.
               </p>
               {!nanogptConnected ? (
                 <p className="text-sm text-slate-500">Configure a NanoGPT API key above to load models.</p>

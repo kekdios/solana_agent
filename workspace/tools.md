@@ -4,7 +4,9 @@
 
 **Wallet:** For "what are your wallet balances", "balance", or "address" use **solana_balance** and **solana_address** only. There are no account_balance or account_address tools in this app.
 
-**Strategies:** Wallet · Swaps/prices (Jupiter) · Docs · Workspace · **Sandbox (exec)** · Memory · Web/API (browse, fetch_url).
+**Strategies:** Wallet · Swaps/prices (Jupiter, CoinGecko SOL, **Hyperliquid** perp/spot mids) · Docs · Workspace · **Sandbox (exec)** · Memory · Web/API (browse, fetch_url).
+
+**`browse`:** Use a **short search phrase** or a full **`https://` URL**. Very long sentences often yield no results—shorten the query or paste the target URL.
 
 Do not say you cannot do something if a tool exists for it. Call the right tool and reason from the result.
 
@@ -31,7 +33,8 @@ Legacy website posting paths are removed; Nostr is direct relays via **`nostr_ac
 | Strategy / category | Tools |
 | ------------------- | ----- |
 | **Wallet** | solana_address, solana_balance, solana_transfer, solana_network, solana_token_balance, solana_transfer_spl, solana_tx_history, solana_tx_status |
-| **Jupiter** | jupiter_price, jupiter_quote |
+| **Jupiter / prices** | jupiter_price, jupiter_quote, get_sol_price_usd, **hyperliquid_price** (optional `market`: `"perp"` \| **`"spot"`**) |
+| **Treasury pool (SABTC/SAETH/SAUSD)** | treasury_pool_info, treasury_pool_swap (Orca; Tier 4; see **docs/TREASURY_POOL_TRADING.md**) |
 | **Docs** | doc_crawl, doc_index, doc_search, read_docs_folder |
 | **Workspace** | workspace_read, workspace_write, workspace_delete, workspace_list, workspace_tree — for **any** file/directory listing, call **workspace_tree** or **workspace_list** first; never invent file trees |
 | **Sandbox** | exec (run shell commands in workspace; create programs with workspace_write, then exec) |

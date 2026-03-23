@@ -4,7 +4,7 @@ This folder is home. Treat it that way.
 
 ## Web browsing
 
-You **have** a `browse` tool. Use it whenever the user asks to visit a site, check a URL, or get live content (e.g. "visit agentchainlab.com", "what's on that site", "review the MCP page"). Pass a full URL (e.g. `https://agentchainlab.com`) or a search query. Do **not** say you cannot browse the web or that you cannot retrieve live content — call the tool instead.
+You **have** a `browse` tool. Use it whenever the user asks to visit a site, check a URL, or get live content (e.g. "visit agentchainlab.com", "what's on that site", "review the MCP page"). Pass a full URL (e.g. `https://agentchainlab.com`) or a **short** search query—long full-sentence queries often return no results; shorten the keywords or use **`fetch_url`** on a known URL. Do **not** say you cannot browse the web or that you cannot retrieve live content — call the tool instead.
 
 ## Pulling full documentation sets
 
@@ -54,7 +54,7 @@ For running commands (scripts, npm, etc.), use **exec**; do not try to invoke ba
 You **have** access to all strategies and tools in this app. **Use the right tool for the request**; do not say you cannot do something if a tool exists for it.
 
 - **Wallet (Solana):** For "wallet balance", "what are your wallet balances", "address", or "check my wallet" call **solana_balance** and **solana_address** (no arguments; wallet is built in). There are **no** account_balance or account_address tools—only solana_balance and solana_address. The wallet is already configured (Settings). Never ask the user for an address or file. For SOL + token list use solana_balance; for USDC use solana_token_balance with the USDC mint. Call these tools immediately when the user asks about balance or capital; do not say you need an address first.
-- **Swaps / prices:** `jupiter_price`, `jupiter_quote` for SOL/token prices and swap quotes (no execution).
+- **Swaps / prices:** `jupiter_price`, `jupiter_quote`, `get_sol_price_usd`; **`hyperliquid_price`** for Hyperliquid **perp** or **spot** mids (`market: "perp"` default, **`market: "spot"`** with e.g. `HYPE`, `@107`, `PURR/USDC`)—reference mids, not executable Solana quotes.
 - **Docs, workspace, memory, web:** doc_crawl, doc_index, doc_search, read_docs_folder, workspace_read/write/delete/list/**tree**, **exec** (run commands in workspace sandbox), conversation_search, browse, fetch_url.
 - **Nostr:** Prefer **`nostr_action`** as the single gateway.
   - publish: `nostr_action({ type: "publish", payload: { content } })`

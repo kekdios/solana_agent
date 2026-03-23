@@ -59,7 +59,7 @@ Each SPL row has **mint**, **decimals**, **uiAmount**. When the server adds **to
 | User asks | Tool(s) to use |
 | --------- | --------------- |
 | "SOL price" / "How much is SOL in USD?" | `jupiter_price` (default is SOL) |
-| "Hyperliquid BTC/ETH price" / "HL perp mid" / compare pool to external | **`hyperliquid_price`** (default BTC+ETH; optional `coins`: e.g. `["SOL"]`) |
+| "Hyperliquid BTC/ETH price" / "HL perp mid" / **spot** mid (e.g. HYPE) / compare pool to external | **`hyperliquid_price`** (`market: "perp"` default; **`market: "spot"`**, `coins: ["HYPE"]` or `@107`) |
 | "Price of [token]" | `jupiter_price` with ids (mint or "SOL", etc.) |
 | "What would I get if I swapped 1 SOL for USDC?" / "Quote a swap" | `jupiter_quote` (input_mint, output_mint, amount) |
 | **"Swap X to USDC" / "Sell my SOL" / "Execute a swap"** | **Prepare→confirm→execute flow:** `jupiter_swap_prepare` → user confirms → `jupiter_swap_execute`. See **`workspace/skills/solana_swaps/SKILLS.md`** for the full playbook. |
