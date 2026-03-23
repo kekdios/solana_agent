@@ -320,7 +320,7 @@ export const useChatStore = create((set, get) => ({
   },
 
   createBulletinPaymentIntent: async () => {
-    throw new Error("Legacy bulletin payment intent flow removed in pure Nostr mode.");
+    throw new Error("Removed: use Nostr (nostr_action) instead of website payment intents.");
   },
 
   fetchLatestBulletinIntent: async () => {
@@ -328,7 +328,7 @@ export const useChatStore = create((set, get) => ({
   },
 
   executeBulletinOneClick: async () => {
-    throw new Error("Legacy bulletin one-click flow removed in pure Nostr mode.");
+    throw new Error("Removed: use Nostr (nostr_action) instead of website one-click flows.");
   },
 
   fetchUsageTotal: async () => {

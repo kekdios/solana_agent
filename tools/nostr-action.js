@@ -8,9 +8,7 @@ const DEFAULT_RELAYS = [
 ];
 
 function getRelayList(env = {}) {
-  const raw =
-    String(env?.NOSTR_RELAYS ?? process.env.NOSTR_RELAYS ?? "").trim() ||
-    String(env?.CLAWSTR_RELAYS ?? process.env.CLAWSTR_RELAYS ?? "").trim();
+  const raw = String(env?.NOSTR_RELAYS ?? process.env.NOSTR_RELAYS ?? "").trim();
   if (!raw) return [...DEFAULT_RELAYS];
   const relays = raw
     .split(/[,\s;]+/)
@@ -20,11 +18,11 @@ function getRelayList(env = {}) {
 }
 
 function getNsec(env = {}) {
-  return String(env?.NOSTR_NSEC ?? process.env.NOSTR_NSEC ?? "").trim() || String(env?.CLAWSTR_NSEC ?? process.env.CLAWSTR_NSEC ?? "").trim();
+  return String(env?.NOSTR_NSEC ?? process.env.NOSTR_NSEC ?? "").trim();
 }
 
 function getNpubFromEnv(env = {}) {
-  return String(env?.NOSTR_NPUB ?? process.env.NOSTR_NPUB ?? "").trim() || String(env?.CLAWSTR_NPUB ?? process.env.CLAWSTR_NPUB ?? "").trim() || null;
+  return String(env?.NOSTR_NPUB ?? process.env.NOSTR_NPUB ?? "").trim() || null;
 }
 
 function decodeSecretKey(nsec) {
@@ -103,10 +101,39 @@ async function publishEvent({ relays, event, timeoutMs = 12000 }) {
   }
 }
 
+/** Default `l`-tag label values (second element) for topic-filtered feeds — OR semantics. */
+export const DEFAULT_FEED_TOPIC_LABELS = Object.freeze(["ai", "blockchain", "defi"]);
+
+function eventHasAnyTopicLabel(ev, labels) {
+  if (!labels || labels.length === 0) return true;
+  const set = new Set(labels.map((x) => String(x).toLowerCase()));
+  return (ev.tags || []).some(
+    (t) => Array.isArray(t) && t[0] === "l" && set.has(String(t[1] || "").toLowerCase())
+  );
+}
+
+function normalizeTopicLabelsInput(raw) {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) {
+    const out = raw.map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+    return out.length ? out : null;
+  }
+  if (typeof raw === "string") {
+    const out = raw
+      .split(/[,;\s]+/)
+      .map((x) => x.trim().toLowerCase())
+      .filter(Boolean);
+    return out.length ? out : null;
+  }
+  return null;
+}
+
 function buildPostTags() {
   return [
     ["L", "agent"],
     ["l", "ai", "agent"],
+    ["l", "blockchain", "agent"],
+    ["l", "defi", "agent"],
   ];
 }
 
@@ -116,6 +143,8 @@ function buildReplyTags({ parentEventId, parentPubkey }) {
     ["k", "1111"],
     ["L", "agent"],
     ["l", "ai", "agent"],
+    ["l", "blockchain", "agent"],
+    ["l", "defi", "agent"],
   ];
   if (parentPubkey) tags.push(["p", parentPubkey]);
   return tags;
@@ -153,16 +182,19 @@ async function readScope(payload, env) {
   const signerNpub = signerPubkey ? nip19.npubEncode(signerPubkey) : npub;
 
   if (scope === "health") {
+    const relayLine = relays.length ? relays.join(", ") : "(none — defaults apply if unset)";
     return {
       ok: true,
       agent_report:
-        `**Direct Nostr runtime** — relay signing is **${sk ? "configured" : "not configured"}**.` +
+        `**Nostr (direct relays)** — signing **${sk ? "configured" : "not configured"}**.` +
         (signerNpub ? `\n- **npub:** \`${signerNpub}\`` : "") +
-        `\n- **Relays:** ${relays.join(", ")}`,
+        `\n- **Relays (${relays.length}):** ${relayLine}` +
+        `\n- **Note:** Nostr here is **relays only** (no separate website or dashboard URL)—use the list above and \`nostr_action\`.`,
       summary: {
         signing_configured: !!sk,
         npub: signerNpub,
         relays,
+        relays_count: relays.length,
       },
       endpoint: "nostr://direct",
       read_scope: scope,
@@ -170,9 +202,11 @@ async function readScope(payload, env) {
   }
 
   if (scope === "public_health") {
+    const relayLine = relays.length ? relays.join(", ") : "(defaults)";
     return {
       ok: true,
-      agent_report: `**Direct Nostr runtime (public health)** — relays configured: ${relays.length}.`,
+      agent_report:
+        `**Nostr public health (relays only)** — **${relays.length}** relay URL(s): ${relayLine}. No external posting API; use \`nostr_action\` + \`NOSTR_NSEC\` to publish.`,
       summary: { ok: true, relays_count: relays.length, relays },
       endpoint: "nostr://direct",
       read_scope: scope,
@@ -187,7 +221,7 @@ async function readScope(payload, env) {
       for (const tag of ev.tags || []) {
         if (Array.isArray(tag) && (tag[0] === "i" || tag[0] === "I")) {
           const v = String(tag[1] || "").trim();
-          if (v.startsWith("https://clawstr.com/c/")) set.add(v);
+          if (v.startsWith("https://") && v.length >= 12 && v.length < 512) set.add(v);
         }
       }
     }
@@ -204,7 +238,7 @@ async function readScope(payload, env) {
     };
   }
 
-  if (scope !== "feed" && scope !== "public_feed" && scope !== "clawstr_feed") {
+  if (scope !== "feed" && scope !== "public_feed") {
     return {
       ok: false,
       error: `INVALID_SCOPE: ${scope}`,
@@ -216,11 +250,13 @@ async function readScope(payload, env) {
 
   const limit = Math.min(100, Math.max(1, Number(payload.limit) || 30));
   const aiOnly = payload.ai_only === true || payload.ai_only === "true" || payload.ai_only === 1;
+  const topicLabels =
+    normalizeTopicLabelsInput(payload.topic_labels) ?? (aiOnly ? [...DEFAULT_FEED_TOPIC_LABELS] : null);
   const q = await queryEvents({ relays, filter: { kinds: [1111], limit: Math.min(300, limit * 4) }, timeoutMs: 12000 });
   if (!q.ok) return { ok: false, error: q.error, read_scope: scope };
   let events = q.events.sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
   if (aiOnly) {
-    events = events.filter((ev) => (ev.tags || []).some((t) => Array.isArray(t) && t[0] === "l" && t[1] === "ai"));
+    events = events.filter((ev) => eventHasAnyTopicLabel(ev, topicLabels));
   }
   events = events.slice(0, limit);
   const previews = events.map((ev, i) => ({
@@ -234,9 +270,17 @@ async function readScope(payload, env) {
   return {
     ok: true,
     agent_report:
-      `**${scope === "public_feed" ? "Public feed" : "Nostr feed"} (direct Nostr relays)** — **${events.length}** entr${events.length === 1 ? "y" : "ies"} (limit=${limit}, ai_only=${aiOnly}).` +
+      `**${scope === "public_feed" ? "Public feed" : "Nostr feed"} (direct Nostr relays)** — **${events.length}** entr${events.length === 1 ? "y" : "ies"} (limit=${limit}, ai_only=${aiOnly}${
+        aiOnly ? `, topic_labels_OR=${(topicLabels || []).join("|")}` : ""
+      }).` +
       (lines.length ? `\n\n${lines.join("\n")}` : "\n\n_(No matching posts.)_"),
-    summary: { total_returned: events.length, limit, ai_only: aiOnly, relays_used: relays.length },
+    summary: {
+      total_returned: events.length,
+      limit,
+      ai_only: aiOnly,
+      topic_labels: aiOnly ? topicLabels : null,
+      relays_used: relays.length,
+    },
     posts_preview: previews,
     endpoint: "nostr://direct",
     read_scope: scope,
@@ -274,7 +318,7 @@ export async function nostrAction(args = {}, env = {}) {
   }
 
   if (t === "read") {
-    const guard = rejectUnknownPayloadFields(payload, new Set(["scope", "limit", "ai_only"]), "payload");
+    const guard = rejectUnknownPayloadFields(payload, new Set(["scope", "limit", "ai_only", "topic_labels"]), "payload");
     if (guard) return normalizeResult(t, "nostr_direct", { ...guard, agent_report: guard.error });
     return normalizeResult(t, "nostr_direct", await readScope(payload, env));
   }
@@ -497,6 +541,58 @@ export async function fetchAgentKind1111Posts(env = {}, opts = {}) {
     limit,
     until: until ?? null,
     next_until,
+  };
+}
+
+/**
+ * Fetch latest kind 1111 posts from relays (global feed, not author-filtered).
+ * Matches what users usually ask with "what's new on nostr".
+ */
+export async function fetchLatestKind1111FeedPosts(env = {}, opts = {}) {
+  const limitRaw = opts.limit != null ? Number(opts.limit) : 10;
+  const limit = Math.min(100, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 10));
+  const until =
+    opts.until != null && Number.isFinite(Number(opts.until)) ? Math.floor(Number(opts.until)) : undefined;
+  const aiOnly = opts.ai_only === true || opts.ai_only === "true" || opts.ai_only === 1;
+  const topicLabels =
+    normalizeTopicLabelsInput(opts.topic_labels) ?? (aiOnly ? [...DEFAULT_FEED_TOPIC_LABELS] : null);
+
+  const relays = getRelayList(env);
+  const filter = { kinds: [1111], limit: Math.min(400, limit * 6) };
+  if (until != null) filter.until = until;
+
+  const q = await queryEvents({ relays, filter, timeoutMs: 18000 });
+  if (!q.ok) return { ok: false, error: q.error || "Relay query failed" };
+
+  let events = [...(q.events || [])].sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
+  if (aiOnly) {
+    events = events.filter((ev) => eventHasAnyTopicLabel(ev, topicLabels));
+  }
+  events = events.slice(0, limit);
+
+  const posts = events.map((ev) => ({
+    id: ev.id,
+    pubkey: ev.pubkey,
+    created_at: ev.created_at,
+    content: ev.content != null ? String(ev.content) : "",
+    kind: ev.kind,
+  }));
+
+  const oldestTs = events.length ? Number(events[events.length - 1].created_at) : null;
+  const next_until =
+    events.length > 0 && events.length === limit && oldestTs != null && Number.isFinite(oldestTs)
+      ? oldestTs - 1
+      : null;
+
+  return {
+    ok: true,
+    relays,
+    posts,
+    limit,
+    until: until ?? null,
+    next_until,
+    ai_only: aiOnly,
+    topic_labels: aiOnly ? topicLabels : null,
   };
 }
 

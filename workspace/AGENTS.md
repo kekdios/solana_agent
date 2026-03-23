@@ -58,9 +58,9 @@ You **have** access to all strategies and tools in this app. **Use the right too
 - **Docs, workspace, memory, web:** doc_crawl, doc_index, doc_search, read_docs_folder, workspace_read/write/delete/list/**tree**, **exec** (run commands in workspace sandbox), conversation_search, browse, fetch_url.
 - **Nostr:** Prefer **`nostr_action`** as the single gateway.
   - publish: `nostr_action({ type: "publish", payload: { content } })`
-  - read: `nostr_action({ type: "read", payload: { scope: "feed" | "public_feed" | "communities" | "health" | "public_health", limit?, ai_only? } })`
+  - read: `nostr_action({ type: "read", payload: { scope: "feed" | "public_feed" | "communities" | "health" | "public_health", limit?, ai_only?, topic_labels? } })` — when `ai_only` is true, feed uses label OR filter default `ai` | `blockchain` | `defi`; optional `topic_labels` overrides.
   - reply/react/profile are supported in direct relay mode.
-  - Do not use legacy `bulletin_*` / `clawstr_*` names (removed in pure Nostr mode).
+  - Use **`NOSTR_NSEC`**, **`NOSTR_NPUB`**, **`NOSTR_RELAYS`** only for identity/relays (no legacy alias names in new config).
 
 **Single source of truth:** See **TOOLS.md** for the full table and detailed specs. When the user asks about balance, swaps, or sandbox/exec, call the corresponding tool and reason from the result.
 

@@ -21,7 +21,7 @@ import * as docCrawlModule from "./tools/doc-crawl.js";
 import * as docIndexModule from "./tools/doc-index.js";
 import * as docSearchModule from "./tools/doc-search.js";
 import * as readDocsFolderModule from "./tools/read-docs-folder.js";
-import { nostrAction as nostrActionDirect, fetchAgentKind1111Posts } from "./tools/nostr-action.js";
+import { nostrAction as nostrActionDirect, fetchAgentKind1111Posts, fetchLatestKind1111FeedPosts } from "./tools/nostr-action.js";
 import * as solana from "./tools/solana.js";
 import * as treasuryPool from "./tools/treasury-pool-swap.js";
 import { treasuryPoolInfo } from "./tools/treasury-pool-info.js";
@@ -33,6 +33,8 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const INCEPTION_API = "https://api.inceptionlabs.ai/v1/chat/completions";
 const VENICE_API = "https://api.venice.ai/api/v1/chat/completions";
 const NANOGPT_API = "https://nano-gpt.com/api/v1/chat/completions";
+/** Default NanoGPT chat model (override via NANOGPT_MODEL in config). */
+const DEFAULT_NANOGPT_MODEL = "x-ai/grok-4-fast";
 /** Injected into the first-turn system message (concatenated, in order). Keep lean; full repo TOOLS.md is separate. */
 const WORKSPACE_FILES = ["SOUL.md", "AGENTS.md", "tools.md", "skills/nostr/SKILLS.md"];
 
@@ -386,7 +388,7 @@ const PARAM_SCHEMAS = {
       payload: {
         type: "object",
         description:
-          "Strict payload shape depends on type. publish: {content}. read: {scope: feed|public_feed|communities|health|public_health, limit?, ai_only?}.",
+          "Strict payload shape depends on type. publish: {content}. read: {scope: feed|public_feed|communities|health|public_health, limit?, ai_only?, topic_labels?}.",
       },
     },
     required: ["type", "payload"],
@@ -1585,6 +1587,8 @@ function ensureDefaultConfigKey(key, plaintextValue) {
 let apiKey = loadConfigKey("INCEPTION_API_KEY") || null;
 let veniceApiKey = loadConfigKey("VENICE_ADMIN_KEY") || null;
 let nanogptApiKey = loadConfigKey("NANOGPT_API_KEY") || null;
+ensureDefaultConfigKey("NANOGPT_MODEL", DEFAULT_NANOGPT_MODEL);
+let nanogptModel = (loadConfigKey("NANOGPT_MODEL") || "").trim() || DEFAULT_NANOGPT_MODEL;
 let jupiterApiKey = loadConfigKey("JUPITER_API_KEY") || null;
 let chatBackend = (loadConfigKey("CHAT_BACKEND") || "").toLowerCase();
 if (chatBackend !== "venice" && chatBackend !== "nanogpt" && chatBackend !== "inception") chatBackend = "nanogpt";
@@ -1768,7 +1772,8 @@ function getChatBackendConfig() {
     return { url: VENICE_API, model: "venice-uncensored", apiKey: veniceApiKey };
   }
   if (chatBackend === "nanogpt") {
-    return { url: NANOGPT_API, model: "x-ai/grok-4-fast", apiKey: nanogptApiKey };
+    const m = (nanogptModel && String(nanogptModel).trim()) || DEFAULT_NANOGPT_MODEL;
+    return { url: NANOGPT_API, model: m, apiKey: nanogptApiKey };
   }
   return { url: INCEPTION_API, model: "mercury-2", apiKey };
 }
@@ -1795,8 +1800,6 @@ function syncNostrKeysToProcessEnv() {
   const pairs = [
     ["NOSTR_NSEC", "NOSTR_NSEC"],
     ["NOSTR_NPUB", "NOSTR_NPUB"],
-    ["CLAWSTR_NSEC", "CLAWSTR_NSEC"],
-    ["CLAWSTR_NPUB", "CLAWSTR_NPUB"],
     ["NOSTR_RELAYS", "NOSTR_RELAYS"],
   ];
   for (const [cfgKey, envKey] of pairs) {
@@ -1852,6 +1855,63 @@ const server = createServer(async (req, res) => {
       await conn.getSlot();
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, network: getSolanaNetworkFromRpc(rpcUrl) }));
+    } catch (e) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e?.message || String(e) }));
+    }
+    return;
+  }
+  if (path === "/api/nanogpt/models" && req.method === "GET") {
+    const key = loadConfigKey("NANOGPT_API_KEY") || nanogptApiKey;
+    if (!key || !key.trim()) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "NANOGPT_API_KEY not set" }));
+      return;
+    }
+    const reqUrl = new URL(req.url || "/", "http://127.0.0.1");
+    const search = reqUrl.search || "";
+    const upstream = `https://nano-gpt.com/api/v1/models${search}`;
+    /** OpenAI-shaped list or variants; detailed=true still uses `data` per NanoGPT docs. */
+    function modelArrayFromBody(body) {
+      if (!body || typeof body !== "object") return [];
+      if (Array.isArray(body.data)) return body.data;
+      if (Array.isArray(body.models)) return body.models;
+      return [];
+    }
+    try {
+      // Match check-balance: x-api-key only (Bearer + x-api-key broke some keys / empty filtered lists).
+      let r = await fetch(upstream, {
+        headers: { "x-api-key": key.trim() },
+      });
+      let payload = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: payload.message || payload.error || `HTTP ${r.status}`,
+          })
+        );
+        return;
+      }
+      let list = modelArrayFromBody(payload);
+      // Subscription-only view can return []; public catalog still lists IDs for the picker.
+      if (list.length === 0) {
+        const r2 = await fetch(`https://nano-gpt.com/api/v1/models${search}`);
+        const p2 = await r2.json().catch(() => ({}));
+        if (r2.ok && modelArrayFromBody(p2).length > 0) {
+          payload = p2;
+          list = modelArrayFromBody(p2);
+        }
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: true,
+          object: payload.object || "list",
+          data: list,
+        })
+      );
     } catch (e) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e?.message || String(e) }));
@@ -2159,6 +2219,7 @@ const server = createServer(async (req, res) => {
             status: nanogptStatus,
             masked: nanogptMasked,
           },
+          nanogptModel: nanogptModel || DEFAULT_NANOGPT_MODEL,
           JUPITER_API_KEY: {
             status: jupiterApiKey ? "CONNECTED" : "NOT_CONFIGURED",
             masked: jupiterApiKey ? masked(jupiterApiKey) : null,
@@ -2716,6 +2777,16 @@ const server = createServer(async (req, res) => {
           db.setConfig(key, encrypt(""));
         }
         nanogptApiKey = value || null;
+      } else if (key === "NANOGPT_MODEL") {
+        const raw = (value || "").trim() || DEFAULT_NANOGPT_MODEL;
+        const enc = encrypt(raw);
+        if (!enc) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Encryption failed" }));
+          return;
+        }
+        db.setConfig(key, enc);
+        nanogptModel = raw;
       } else if (key === "JUPITER_API_KEY") {
         if (value) {
           const enc = encrypt(value);
@@ -2730,12 +2801,6 @@ const server = createServer(async (req, res) => {
         }
         jupiterApiKey = value || null;
         if (jupiterApiKey) process.env.JUPITER_API_KEY = jupiterApiKey;
-      } else if (
-        ["CLAWSTR_AGENT_CODE", "BULLETIN_BASE_URL", "BULLETIN_ADMIN_TOKEN"].includes(key)
-      ) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Unsupported configuration key." }));
-        return;
       } else if (key === "CHAT_BACKEND") {
         const v = (value || "").toLowerCase();
         if (v === "venice" || v === "inception" || v === "nanogpt") {
@@ -2811,7 +2876,7 @@ const server = createServer(async (req, res) => {
           configSolanaRpcStaggerMs = value ?? "";
           process.env.SOLANA_RPC_STAGGER_MS = String(value ?? "").trim();
         }
-      } else {
+      } else if (db.isAllowedEncryptedConfigPostKey(key)) {
         const enc = encrypt(value);
         if (!enc) {
           res.writeHead(500, { "Content-Type": "application/json" });
@@ -2819,6 +2884,15 @@ const server = createServer(async (req, res) => {
           return;
         }
         db.setConfig(key, enc);
+      } else {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Unknown or unsupported configuration key.",
+          })
+        );
+        return;
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, message: "Saved" }));
@@ -2951,7 +3025,7 @@ const server = createServer(async (req, res) => {
         const nostrRule =
           suggestsNostr || conversationMentionsNostr
             ? "**Nostr (direct relays):** use **nostr_action** only. Publish: `{type:'publish', payload:{content}}` (requires **NOSTR_NSEC**). " +
-              "Read: `{type:'read', payload:{scope:'feed'|'public_feed'|'communities'|'health'|'public_health', limit?, ai_only?}}`. " +
+              "Read: `{type:'read', payload:{scope:'feed'|'public_feed'|'communities'|'health'|'public_health', limit?, ai_only?, topic_labels?}}` (with `ai_only`, feed uses OR of `l` labels ai|blockchain|defi unless `topic_labels` overrides). " +
               "Reply / react / profile use the same tool with matching `type` and payload. Prefer **`agent_report`** in the tool result for user-facing text.\n\n"
             : "";
         const reportingRule =
@@ -3265,6 +3339,35 @@ const server = createServer(async (req, res) => {
       const out = await fetchAgentKind1111Posts(process.env, {
         limit: limit != null && limit !== "" ? Number(limit) : 100,
         until: until != null && until !== "" ? Number(until) : undefined,
+      });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(out));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }));
+    }
+    return;
+  }
+
+  if (path === "/api/nostr/feed" && req.method === "GET") {
+    try {
+      const u = new URL(req.url || "/", "http://127.0.0.1");
+      const limit = u.searchParams.get("limit");
+      const until = u.searchParams.get("until");
+      const aiOnlyRaw = u.searchParams.get("ai_only");
+      const topicParam = u.searchParams.get("topic_labels");
+      let topic_labels = undefined;
+      if (topicParam != null && String(topicParam).trim() !== "") {
+        topic_labels = String(topicParam)
+          .split(/[,;\s]+/)
+          .map((s) => s.trim().toLowerCase())
+          .filter(Boolean);
+      }
+      const out = await fetchLatestKind1111FeedPosts(process.env, {
+        limit: limit != null && limit !== "" ? Number(limit) : 10,
+        until: until != null && until !== "" ? Number(until) : undefined,
+        ai_only: aiOnlyRaw == null ? true : aiOnlyRaw === "1" || aiOnlyRaw === "true",
+        topic_labels,
       });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(out));

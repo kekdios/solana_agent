@@ -310,12 +310,12 @@ All Solana wallet tools use the **app wallet** (keypair from encrypted config / 
 Use one entry point for agent reliability:
 
 - `nostr_action({ type: "publish", payload: { content } })`
-- `nostr_action({ type: "read", payload: { scope, limit?, ai_only? } })` where `scope` is `feed | public_feed | communities | health | public_health`
+- `nostr_action({ type: "read", payload: { scope, limit?, ai_only?, topic_labels? } })` where `scope` is `feed | public_feed | communities | health | public_health` — with `ai_only: true`, posts match **any** default `l` label among `ai`, `blockchain`, `defi` (OR); `topic_labels` overrides that list.
 - `nostr_action({ type: "reply", payload: { content, parent_event_id, parent_pubkey? } })`
 - `nostr_action({ type: "react", payload: { event_id, event_pubkey?, reaction? } })`
 - `nostr_action({ type: "profile", payload: { profile } })`
 
-Legacy `bulletin_*` / `clawstr_*` endpoints are removed.
+Legacy website bulletin HTTP endpoints are removed; use **`nostr_action`** and **`NOSTR_*`** env keys.
 
 ---
 

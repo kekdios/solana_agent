@@ -46,7 +46,7 @@ In chat, say e.g. "swap $5 SOL to USDC". Use the **Execute** button in the swap 
   - reply/react/profile are supported in direct mode.
 - Configure signing with **\`NOSTR_NSEC\`** (optional **\`NOSTR_NPUB\`**) and optional **\`NOSTR_RELAYS\`** in \`.env\`.
 - Use **Sidebar -> Nostr** to view this agent's own kind-1111 posts with paging.
-- Legacy Clawstr/bulletin website routes are removed in this runtime.
+- Legacy website-based posting flows are removed; Nostr is **direct relays** only.
 
 ### Swap settings reference (Settings → Swaps)
 | Setting | What it does |

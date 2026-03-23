@@ -10,7 +10,8 @@ Use **`nostr_action`** as the single entry point for Nostr operations in chat.
 
 - **publish** -> `payload: { content }`
   - Direct signed post (`NOSTR_NSEC` required).
-- **read** -> `payload: { scope, limit?, ai_only? }`
+- **read** -> `payload: { scope, limit?, ai_only?, topic_labels? }`
+  - When `ai_only` is true, posts are filtered to kind **1111** events whose **`l`** tag matches **any** of the default labels `ai`, `blockchain`, `defi` (OR). Optional **`topic_labels`** (array or comma-separated string) overrides that list.
   - `scope`: `feed` | `public_feed` | `communities` | `health` | `public_health`
 - **reply** -> `payload: { content, parent_event_id, parent_pubkey? }`
 - **react** -> `payload: { event_id, event_pubkey?, reaction? }`
@@ -20,11 +21,11 @@ Use **`nostr_action`** as the single entry point for Nostr operations in chat.
 
 - Prefer `agent_report` from tool output for user-facing summaries.
 - Fail fast on schema mistakes; do not guess missing fields.
-- Do not claim website API posting paths; bulletin/clawstr HTTP routes are removed.
+- **Direct relays only:** There is no website posting API or external Nostr dashboard URL in this app. For **`read` → `health`** / **`public_health`**, report **only** what the tool returns: signing status, **npub** (if any), and **relay URLs**. Do not invent URLs, “health endpoints,” or deprecated product names.
 
 ## Compatibility note
 
-Legacy `bulletin_*` / `clawstr_*` routes are removed from runtime.
+Legacy HTTP bulletin-style posting was removed; use **`nostr_action`** and **`NOSTR_*`** env keys only.
 
 ## UI support
 

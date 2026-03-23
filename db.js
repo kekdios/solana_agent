@@ -523,12 +523,11 @@ const ENV_MANAGED_KEYS = new Set([
   "INCEPTION_API_KEY",
   "VENICE_ADMIN_KEY",
   "NANOGPT_API_KEY",
+  "NANOGPT_MODEL",
   "JUPITER_API_KEY",
-  "CLAWSTR_AGENT_CODE",
   "NOSTR_NPUB",
   "NOSTR_NSEC",
-  "CLAWSTR_NPUB",
-  "CLAWSTR_NSEC",
+  "NOSTR_RELAYS",
   "SOLANA_PRIVATE_KEY",
   "SOLANA_PUBLIC_KEY",
   "PORT",
@@ -540,11 +539,21 @@ const ENV_MANAGED_KEYS = new Set([
   "DATA_DIR",
   "SOLANA_RPC_PACE_MS",
   "SOLANA_RPC_STAGGER_MS",
-  "BULLETIN_ADMIN_TOKEN",
   "HELIUS_API_KEY",
   "TEST_PRIV_KEY",
   "TEST_ADDRESS",
 ]);
+
+/** Keys allowed for POST /api/config generic encrypted store (excludes handled branches like API keys). */
+const SA_AGENT_SYMBOL_KEY_RE = /^SA[A-Z0-9]{2,20}$/;
+export function isAllowedEncryptedConfigPostKey(key) {
+  if (!key || typeof key !== "string") return false;
+  if (ENV_MANAGED_KEYS.has(key)) return true;
+  if (key.startsWith("SWAPS_")) return true;
+  if (key === "SA_AGENT_TOKENS") return true;
+  if (SA_AGENT_SYMBOL_KEY_RE.test(key)) return true;
+  return false;
+}
 
 function readEnvMap() {
   const out = new Map();

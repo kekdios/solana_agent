@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useChatStore } from "../store/chatStore";
 
 const setSolanaNetwork = (n) => useChatStore.getState().setSolanaNetwork(n);
@@ -7,9 +7,11 @@ const ENV_MANAGED_KEYS = new Set([
   "INCEPTION_API_KEY",
   "VENICE_ADMIN_KEY",
   "NANOGPT_API_KEY",
+  "NANOGPT_MODEL",
   "JUPITER_API_KEY",
   "NOSTR_NPUB",
   "NOSTR_NSEC",
+  "NOSTR_RELAYS",
   "SOLANA_PRIVATE_KEY",
   "SOLANA_PUBLIC_KEY",
   "PORT",
@@ -21,12 +23,13 @@ const ENV_MANAGED_KEYS = new Set([
   "DATA_DIR",
   "SOLANA_RPC_PACE_MS",
   "SOLANA_RPC_STAGGER_MS",
-  "BULLETIN_ADMIN_TOKEN",
   "HELIUS_API_KEY",
   "TEST_PRIV_KEY",
   "TEST_ADDRESS",
 ]);
 const settingsStoreFor = (key) => (ENV_MANAGED_KEYS.has(key) ? ".env" : "app-settings.json");
+const DEFAULT_NANOGPT_MODEL = "x-ai/grok-4-fast";
+
 const SettingsStoreBadge = ({ settingKey }) => (
   <span className="ml-1.5 rounded px-1.5 py-0.5 text-[10px] leading-none bg-slate-700/60 text-slate-300">
     {settingsStoreFor(settingKey)}
@@ -43,6 +46,9 @@ export default function Settings({ onClose }) {
   const [saving, setSaving] = useState(false);
   const [savingVenice, setSavingVenice] = useState(false);
   const [savingNanogpt, setSavingNanogpt] = useState(false);
+  const [nanogptModels, setNanogptModels] = useState([]);
+  const [nanogptModelsLoading, setNanogptModelsLoading] = useState(false);
+  const [nanogptModelsError, setNanogptModelsError] = useState(null);
   const [savingJupiter, setSavingJupiter] = useState(false);
   const [message, setMessage] = useState(null);
 
@@ -134,6 +140,76 @@ export default function Settings({ onClose }) {
       .catch(() => {});
   };
 
+  const fetchNanogptModels = useCallback(async () => {
+    if (!apiBase) return;
+    setNanogptModelsLoading(true);
+    setNanogptModelsError(null);
+    try {
+      const res = await fetch(`${apiBase}/api/nanogpt/models?detailed=true`);
+      const data = await res.json();
+      const rawList = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
+      if (data.ok && rawList.length > 0) {
+        setNanogptModels(
+          rawList
+            .filter((m) => m && typeof m.id === "string" && m.id.length > 0)
+            .map((m) => ({
+              id: m.id,
+              name: m.name || m.id,
+              owned_by: m.owned_by,
+            }))
+        );
+        setNanogptModelsError(null);
+      } else if (data.ok && rawList.length === 0) {
+        setNanogptModels([]);
+        setNanogptModelsError("API returned no models. Try Refresh or check your NanoGPT account.");
+      } else {
+        setNanogptModels([]);
+        setNanogptModelsError(data.error || "Could not load model list");
+      }
+    } catch (e) {
+      setNanogptModels([]);
+      setNanogptModelsError(e.message || "Request failed");
+    } finally {
+      setNanogptModelsLoading(false);
+    }
+  }, [apiBase]);
+
+  useEffect(() => {
+    if (apiBase && config?.NANOGPT_API_KEY?.status === "CONNECTED") {
+      fetchNanogptModels();
+    }
+  }, [apiBase, config?.NANOGPT_API_KEY?.status, fetchNanogptModels]);
+
+  const currentNanogptModel = config?.nanogptModel || DEFAULT_NANOGPT_MODEL;
+  const nanogptModelOptions = useMemo(() => {
+    const ids = new Set(nanogptModels.map((m) => m.id));
+    const list = [...nanogptModels];
+    if (!ids.has(currentNanogptModel)) {
+      list.unshift({ id: currentNanogptModel, name: `${currentNanogptModel} (saved)` });
+    }
+    return list;
+  }, [nanogptModels, currentNanogptModel]);
+
+  const handleSaveNanogptModel = async (modelId) => {
+    setMessage(null);
+    try {
+      const res = await fetch(`${apiBase}/api/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "NANOGPT_MODEL", value: modelId }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setConfig((c) => ({ ...c, nanogptModel: modelId }));
+        setMessage({ type: "success", text: "NanoGPT model saved." });
+      } else {
+        setMessage({ type: "error", text: data.error || "Failed to save model" });
+      }
+    } catch (err) {
+      setMessage({ type: "error", text: err.message || "Request failed" });
+    }
+  };
+
   const handleSaveKey = async (e) => {
     e.preventDefault();
     setSaving(true);
@@ -186,6 +262,9 @@ export default function Settings({ onClose }) {
           },
         }));
         setNanogptKeyInput("");
+        if (nanogptKeyInput.trim()) {
+          fetchNanogptModels();
+        }
       } else {
         setMessage({ type: "error", text: data.error || "Failed to save" });
       }
@@ -290,7 +369,7 @@ export default function Settings({ onClose }) {
       const data = await res.json();
       if (data.ok) {
         setConfig((c) => ({ ...c, chatBackend: value }));
-        const name = value === "venice" ? "Venice" : value === "nanogpt" ? "NanoGPT (Grok 4 Fast)" : "Inception";
+        const name = value === "venice" ? "Venice" : value === "nanogpt" ? "NanoGPT" : "Inception";
         setMessage({ type: "success", text: `Chat provider set to ${name}.` });
       } else {
         setMessage({ type: "error", text: data.error || "Failed to save" });
@@ -553,6 +632,7 @@ export default function Settings({ onClose }) {
   const nanogptConnected = nanogptStatus === "CONNECTED";
   const activeProviderOk =
     chatBackend === "venice" ? veniceConnected : chatBackend === "nanogpt" ? nanogptConnected : isConnected;
+
   const solana = config?.solanaWallet ?? {};
   const hasWallet = solana.hasKeypair;
   const ackDone = solana.passphraseAcknowledged;
@@ -591,7 +671,7 @@ export default function Settings({ onClose }) {
               onChange={handleChatBackendChange}
               className="w-full rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50"
             >
-              <option value="nanogpt">NanoGPT (Grok 4 Fast)</option>
+              <option value="nanogpt">NanoGPT (model below)</option>
               <option value="inception">Inception (mercury-2)</option>
               <option value="venice">Venice (venice-uncensored)</option>
             </select>
@@ -633,6 +713,61 @@ export default function Settings({ onClose }) {
                 {savingNanogpt ? "Saving…" : "Save NanoGPT key"}
               </button>
             </form>
+
+            <div className="mt-4 pt-4 border-t border-[#2a2a30] space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor="nanogpt-model" className="text-xs font-medium uppercase tracking-wider text-slate-400">
+                  NanoGPT chat model
+                </label>
+                <SettingsStoreBadge settingKey="NANOGPT_MODEL" />
+              </div>
+              <p className="text-xs text-slate-500">
+                Loaded from{" "}
+                <a
+                  href="https://docs.nano-gpt.com/api-reference/endpoint/models"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-emerald-400/90 hover:text-emerald-300 underline"
+                >
+                  GET /api/v1/models
+                </a>
+                . Save your API key first.
+              </p>
+              {!nanogptConnected ? (
+                <p className="text-sm text-slate-500">Configure a NanoGPT API key above to load models.</p>
+              ) : (
+                <>
+                  <div className="flex gap-2">
+                    <select
+                      id="nanogpt-model"
+                      value={currentNanogptModel}
+                      onChange={(e) => handleSaveNanogptModel(e.target.value)}
+                      disabled={nanogptModelsLoading && nanogptModelOptions.length === 0}
+                      className="flex-1 min-w-0 rounded-lg bg-[#1a1a1e] border border-[#2a2a30] px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    >
+                      {nanogptModelOptions.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                          {m.owned_by ? ` — ${m.owned_by}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => fetchNanogptModels()}
+                      disabled={nanogptModelsLoading}
+                      className="shrink-0 rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 px-3 py-1.5 text-xs text-slate-200"
+                    >
+                      {nanogptModelsLoading ? "…" : "Refresh"}
+                    </button>
+                  </div>
+                  {nanogptModelsError && <p className="text-xs text-amber-200/90">{nanogptModelsError}</p>}
+                  <p className="text-xs text-slate-600 font-mono truncate" title={currentNanogptModel}>
+                    Active: {currentNanogptModel}
+                  </p>
+                </>
+              )}
+            </div>
           </section>
 
           <section className="rounded-xl bg-[#222228] border border-[#2a2a30] p-4">
