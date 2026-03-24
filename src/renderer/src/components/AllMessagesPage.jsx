@@ -32,6 +32,19 @@ export default function AllMessagesPage() {
   const [summarizeN, setSummarizeN] = useState(20);
   const [summarizing, setSummarizing] = useState(false);
   const [summaryModalText, setSummaryModalText] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+
+  const copyMessageContent = (messageId, text) => {
+    const content = typeof text === "string" ? text : "";
+    if (!content) return;
+    navigator.clipboard.writeText(content).then(
+      () => {
+        setCopiedId(messageId);
+        setTimeout(() => setCopiedId(null), 2000);
+      },
+      () => {}
+    );
+  };
 
   const loadInitial = useCallback(async () => {
     setLoading(true);
@@ -169,6 +182,17 @@ export default function AllMessagesPage() {
                   <th className="text-left py-2 px-3 font-semibold text-slate-400">Role</th>
                   <th className="text-left py-2 px-3 font-semibold text-slate-400">Time</th>
                   <th className="text-left py-2 px-3 font-semibold text-slate-400">Content</th>
+                  <th className="w-12 py-2 px-2 text-center" scope="col" title="Copy full text of each row">
+                    <span className="sr-only">Copy message</span>
+                    <svg className="w-4 h-4 mx-auto text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h2m8 0h2a2 2 0 012 2v2m2 4a2 2 0 01-2 2h-2m-6-12h2a2 2 0 012 2v6a2 2 0 01-2 2h-2z"
+                      />
+                    </svg>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -197,6 +221,31 @@ export default function AllMessagesPage() {
                       <span title={m.content || ""}>
                         {truncate((m.content || "").replace(/\s+/g, " "), CONTENT_PREVIEW_LEN)}
                       </span>
+                    </td>
+                    <td className="py-2 px-2 align-top text-center">
+                      <button
+                        type="button"
+                        onClick={() => copyMessageContent(m.id, m.content)}
+                        disabled={!(m.content && String(m.content).length)}
+                        className="inline-flex p-1.5 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition"
+                        title={copiedId === m.id ? "Copied" : "Copy full message"}
+                        aria-label={copiedId === m.id ? "Copied" : "Copy full message"}
+                      >
+                        {copiedId === m.id ? (
+                          <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h2m8 0h2a2 2 0 012 2v2m2 4a2 2 0 01-2 2h-2m-6-12h2a2 2 0 012 2v6a2 2 0 01-2 2h-2z"
+                            />
+                          </svg>
+                        )}
+                      </button>
                     </td>
                   </tr>
                 ))}
