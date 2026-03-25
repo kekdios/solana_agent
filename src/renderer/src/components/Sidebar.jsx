@@ -180,6 +180,20 @@ export default function Sidebar() {
         </button>
         <button
           type="button"
+          onClick={() => setView("trend")}
+          className={`${navItemClass} ${view === "trend" ? "bg-emerald-500/20 text-emerald-400" : ""}`}
+          title="Trend dashboard (BTC/ETH/SOL VWAP, breadth, ratios)"
+        >
+          <span className={iconClass} aria-hidden>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="3 17 9 11 13 15 21 7" />
+              <polyline points="14 7 21 7 21 14" />
+            </svg>
+          </span>
+          Trend
+        </button>
+        <button
+          type="button"
           onClick={() => setView("nostr")}
           className={`${navItemClass} ${view === "nostr" ? "bg-emerald-500/20 text-emerald-400" : ""}`}
           title="Agent Nostr posts (kind 1111)"

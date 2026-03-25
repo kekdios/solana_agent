@@ -8,6 +8,7 @@ Short-lived or reference notes for the agent and humans—not a source of truth 
 |--------|-----|
 | `YYYY-MM-DD.md` | Day-scoped log (swaps, incidents, what worked). |
 | `<topic>-notes.md` | Themed notes (e.g. `swap-notes.md`). |
+| `trend-latest.json` | Latest **Trend** dashboard stats (written when the in-app Trend page loads/refreshes). Agent: **`trend_snapshot_read`**. |
 
 ## Rules
 

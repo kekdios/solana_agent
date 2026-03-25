@@ -40,7 +40,7 @@ Legacy website posting paths are removed; Nostr is direct relays via **`nostr_ac
 | **Workspace** | workspace_read, workspace_write, workspace_delete, workspace_list, workspace_tree — for **any** file/directory listing, call **workspace_tree** or **workspace_list** first; never invent file trees |
 | **Sandbox** | exec (run shell commands in workspace; create programs with workspace_write, then exec) |
 | **Memory** | conversation_search |
-| **Core / web** | **browse** (SerpApi if key set), fetch_url, file_write, file_read, file_list, heartbeat, **cronjob** (includes **peg_monitor**), get_btc_price, generate_image, analyze_image |
+| **Core / web** | **browse** (SerpApi if key set), fetch_url, file_write, file_read, file_list, heartbeat, **cronjob** (includes **peg_monitor**), get_btc_price, **trend_snapshot_read** (Trend page snapshot → `memory/trend-latest.json`), generate_image, analyze_image |
 
 Slash commands: /save, /history, /help. New chat via sidebar.
 

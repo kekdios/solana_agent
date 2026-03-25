@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "server_received_at": "2026-03-25T16:20:14.148Z",
+  "client": {
+    "schema_version": 1,
+    "updated_at": "2026-03-25T16:20:14.119Z",
+    "ui_last_updated_ms": 1774455614119,
+    "data_source": "coingecko_via_app_proxy",
+    "from_cache": false,
+    "market_state": "TRANSITION",
+    "last_day": "2026-03-25",
+    "prices_usd": {
+      "btc": 70864.14583001738,
+      "eth": 2159.150756128491,
+      "sol": 91.72811233376429
+    },
+    "vwap_distance_pct": {
+      "btc": -0.5982207520984818,
+      "eth": -1.905436803541142,
+      "sol": 0.25633766790350515
+    },
+    "ratios": {
+      "eth_btc": 0.030468874362892487,
+      "sol_eth": 0.042483421814528244,
+      "sol_btc": 0.001294422041772627
+    },
+    "breadth": {
+      "eth_ecosystem": 0.4,
+      "sol_ecosystem": 0.6
+    },
+    "social_comment_bullets": [
+      "Regime (rules-based): TRANSITION.",
+      "Last daily bar date: 2026-03-25.",
+      "BTC ~$70,864 vs anchored VWAP (distance -0.60%).",
+      "Breadth (share of basket above 20d SMA): ETH 40%, SOL 60%.",
+      "Ratios (close): ETH/BTC 0.03047, SOL/BTC 0.001294."
+    ],
+    "disclaimer": "Rule-based dashboard from daily CoinGecko data; not financial advice. Refresh Trend to update."
+  }
+}

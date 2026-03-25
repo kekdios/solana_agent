@@ -116,6 +116,11 @@ tools:
     handler: getBtcPriceUsd
     enabled: true
 
+  - name: trend_snapshot_read
+    description: |
+      Read the latest **Trend dashboard** snapshot (workspace `memory/trend-latest.json`). The file is written whenever the user opens the in-app **Trend** page and data loads (or **Refresh**). Contains rule-based market_state, BTC/ETH/SOL prices vs anchored VWAP, breadth, ratios, and **social_comment_bullets** for drafting a short social/Nostr comment. Not a live trading signal—use for analysis and copy, then **nostr_action** publish if the user wants to post.
+    enabled: true
+
   - name: workspace_read
     description: |
       Read a file from the workspace. Path must be a file path from workspace_tree's file_paths. Do not pass a directory. After reading, reply with content or a summary that MUST cite specific content from the file (e.g. section titles, parameter names, or phrases that appear in it). If you got no content (e.g. ok false or empty response), say clearly that you could not read the file and do NOT invent a summary. Do not mention eligibility, liquidity providers, reward formulas, or contact emails unless they actually appear in the file. Never respond with only raw JSON.

@@ -9,6 +9,7 @@ import AllMessagesPage from "./components/AllMessagesPage";
 import NanoGptPage from "./components/NanoGptPage";
 import NostrPage from "./components/NostrPage";
 import Settings from "./components/Settings";
+import TrendPage from "./components/TrendPage";
 
 function formatTokens(n) {
   if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
@@ -111,6 +112,8 @@ function App() {
           <TradingPage />
         ) : view === "nostr" ? (
           <NostrPage />
+        ) : view === "trend" ? (
+          <TrendPage />
         ) : view === "allMessages" ? (
           <AllMessagesPage />
         ) : view === "nanogpt" ? (

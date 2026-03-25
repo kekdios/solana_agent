@@ -22,6 +22,40 @@ Reports use **only** data from actual tool results (`nostr_action`, `browse`, `f
 
 ---
 
+## Nostr engagement contract
+
+**Purpose:** Personal Nostr engagement backed **only** by real tool results (`nostr_action`, `browse`, `fetch_url`, `workspace_*`, etc.). **Never** simulate success or invent relay/note data.
+
+### Ordered gates
+
+| Step | What to do | Gate to continue |
+|------|------------|-------------------|
+| **1 — Retrieve** | `nostr_action` with `type: "read"` and valid **`scope`**: `feed` \| `public_feed` \| `communities` \| `health` \| `public_health`. (`ai_only` is a **boolean**, not a scope.) | Tool returns **`ok: true`**. If the list is empty, say **zero posts** and do not invent a feed. If **`ok: false`**, **stop** and report the tool error **verbatim**. |
+| **2 — Corroborate** | When “research-backed” applies: **`browse`** and/or **`fetch_url`** (or **`workspace_read`** of content produced by earlier tools in this session). | At least one **successful** corroboration **or** state clearly that search/fetch failed or returned nothing—**no** fake URLs, papers, or articles. If Step 1 did not succeed, **do not** pick a fallback topic from imagination. |
+| **3 — Draft** | Draft reply or top-level **content** only from Step 1 text/ids (and external claims **only** from Step 2). | For **reply**: `parent_event_id` is copied **exactly** from Step 1 tool output. No ids from memory or training data. |
+| **4 — Publish** | `nostr_action` with `type: "reply"` or `type: "publish"` as appropriate. | Only after Steps 1–3 are satisfied for this run. After the tool returns, report **only** what appears in **`action_result`** / **`agent_report`** (e.g. event id). If there is no id in the tool output, **do not** claim a successful publish. |
+
+### Cite rules
+
+1. **Verbatim facts** — Every **event id**, **npub**, **quoted note text**, **URL**, **page title**, **timestamp**, and **number** (counts, percentages, dominance, relay counts) must appear **verbatim** in a **`role: tool`** result for **this** conversation turn (unless the user explicitly allows a prior turn; default is **same turn**).
+2. **Themes only** — You may paraphrase **themes**; you may **not** paraphrase hex ids or fabricate metrics “like” the tool output.
+3. **Sources footer** — For summaries/reports, end with **Sources:** listing note ids + URLs **from tools**, or **Sources: none — [reason from tool error or empty result].**
+4. **No backfill from priors** — If tools failed or returned empty, do not substitute “typical Nostr” or pretraining—say you have **no tool data**.
+
+### Error transparency (pass through exact tool strings)
+
+| Condition | Required behavior |
+|-----------|-------------------|
+| `SIGNING_NOT_CONFIGURED`, missing **`NOSTR_NSEC`**, **`NO_IDENTITY`**, or equivalent | **Stop.** Paste or quote the **exact** error string/code from the tool. No publish, no “I posted” narrative. |
+| Read: `ok: false`, relay error, timeout, RPC error | Quote the tool’s error text; **no** invented events or npubs. |
+| Read: `ok: true` but **zero** posts | State **zero posts**; do not invent a dominant topic or thread. |
+| Browse / `fetch_url`: failure, empty, or “no results” | Say so using the tool message; **no** synthetic citations for Step 2. |
+| Publish: success unclear (e.g. no event **id** in tool JSON) | Do **not** claim success; say the tool output was incomplete or ambiguous. |
+
+*Expanded call shapes, scopes, and logging: sections **Step 1–4** below.*
+
+---
+
 ### Step 1: Read latest Nostr posts
 
 - **Call** (valid contract):  

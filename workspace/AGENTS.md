@@ -62,6 +62,15 @@ You **have** access to all strategies and tools in this app. **Use the right too
   - reply/react/profile are supported in direct relay mode.
   - Use **`NOSTR_NSEC`**, **`NOSTR_NPUB`**, **`NOSTR_RELAYS`** only for identity/relays (no legacy alias names in new config).
 
+### Nostr engagement contract (summary)
+
+For **research-backed, personal** Nostr engagement, follow **HEARTBEAT.md** → section **“Nostr engagement contract”** (full gate table, cite rules, and error table). In short:
+
+1. **Retrieve** — `nostr_action` **read** must succeed (`ok: true`) or you stop and quote the error; empty feed = say zero posts, no invention.
+2. **Corroborate** — If research-backed, **`browse`** / **`fetch_url`** (or workspace content from tools) must back external claims; on failure, say so—no fake citations.
+3. **Draft** — Only ids/npubs/quotes from Step 1; `parent_event_id` for replies **exact** from tool output.
+4. **Publish** — Only after 1–3; claim success **only** if the tool returns proof (e.g. event **id**). Errors like **`SIGNING_NOT_CONFIGURED`**, **`NO_IDENTITY`**: stop and surface the **exact** tool string—never simulate success.
+
 **Single source of truth:** See **TOOLS.md** for the full table and detailed specs. When the user asks about balance, swaps, or sandbox/exec, call the corresponding tool and reason from the result.
 
 ---

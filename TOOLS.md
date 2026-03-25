@@ -37,6 +37,7 @@
 | **Nostr gateway** – single entrypoint with strict action contracts. Publish/read/reply/react/profile via `type` + `payload`. | `nostr_action` |
 | **Web / API** – browse (**SerpApi Google** if **`SERPAPI_API_KEY`**, else DDG/Wikipedia); **`https://` URL** fetch | `browse`, `fetch_url` |
 | **Treasury peg bot** – HL spot vs Orca pool deviation, **dry-run** swaps only; logs **`memory/`**; **Tier 4** | **`peg_monitor_tick`**; schedule **`cronjob`** task **`peg_monitor`**; Trading UI **Run peg check**; CLI **`npm run peg-monitor`** |
+| **Trend dashboard** – BTC/ETH/SOL VWAP, breadth, ratios; snapshot file for agent / social draft | In-app **Trend** page (Refresh writes **`memory/trend-latest.json`**); agent **`trend_snapshot_read`** |
 
 ---
 
@@ -69,6 +70,7 @@
 | **Sandbox**   | `exec`            | Run a shell command in the workspace sandbox (cwd = workspace or workdir). Use after workspace_write to run scripts.     | `exec({ command: "node sandbox/script.js", workdir: "sandbox", timeout: 60 })` |
 | **Memory**    | `conversation_search` | Search past conversations by text; returns conversation_id, excerpt, date (like history but by keyword). | `conversation_search({ query: "Bebop API", limit: 20 })` |
 | **Utility** | `get_btc_price`    | Current Bitcoin price in USD (CoinGecko).                     | `get_btc_price({})` |
+| **Utility** | **`trend_snapshot_read`** | Read latest **Trend** dashboard snapshot (`memory/trend-latest.json`): `market_state`, prices vs VWAP, breadth, ratios, **`social_comment_bullets`** for a short post draft. File updates when the user opens/refreshes **Trend** in the app. Not a trading signal. | `trend_snapshot_read({})` |
 | **Solana**  | `solana_address`   | App wallet Solana address (base58).                           | `solana_address({})` |
 | **Solana**  | `solana_balance`   | SOL + SPL token balances for the app wallet.                  | `solana_balance({})` |
 | **Solana**  | `solana_transfer`  | Send SOL to a recipient (to, amount_sol).                    | `solana_transfer({ to: "…", amount_sol: 0.1 })` |

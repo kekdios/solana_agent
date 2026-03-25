@@ -31,6 +31,7 @@ import { DEFAULT_SA_AGENT_TOKEN_MINTS, loadSaAgentTokenMints } from "./tools/sa-
 import { runPegMonitorTick, getPegMonitorEnvResolved } from "./tools/peg-monitor.js";
 import * as jupiter from "./tools/jupiter.js";
 import * as execModule from "./tools/exec.js";
+import * as trendSnapshot from "./tools/trend-snapshot.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const INCEPTION_API = "https://api.inceptionlabs.ai/v1/chat/completions";
@@ -413,6 +414,7 @@ const PARAM_SCHEMAS = {
     },
     required: ["type", "payload"],
   },
+  trend_snapshot_read: { type: "object", properties: {}, required: [] },
 };
 
 function loadToolRegistry() {
@@ -534,6 +536,7 @@ function toolAllowedByTier(tier, name, args) {
     "jupiter_quote",
     "hyperliquid_price",
     "treasury_pool_info",
+    "trend_snapshot_read",
   ]);
   if (alwaysAllow.has(name)) return true;
 
@@ -716,6 +719,8 @@ async function runTool(name, args, env) {
         });
       case "nostr_action":
         return await nostrActionDirect(args, env);
+      case "trend_snapshot_read":
+        return await trendSnapshot.readTrendSnapshotForTool();
       // Redirect legacy EVM-style names to Solana (app is Solana-only)
       case "account_balance":
         return await solana.solanaBalance(args, {
@@ -1851,6 +1856,90 @@ const server = createServer(async (req, res) => {
     res.end(JSON.stringify({ envPath: ENV_PATH }));
     return;
   }
+
+  /** Trend page: proxy CoinGecko so the renderer uses same-origin /api (avoids browser/Electron NetworkError on direct HTTPS). */
+  const trendCgMatch = path.match(/^\/api\/trend\/coingecko\/v3\/coins\/([^/]+)\/market_chart$/);
+  if (trendCgMatch && req.method === "GET") {
+    let id;
+    try {
+      id = decodeURIComponent(trendCgMatch[1]);
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid coin id" }));
+      return;
+    }
+    if (!/^[a-z0-9-]+$/i.test(id) || id.length > 120) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid coin id" }));
+      return;
+    }
+    const qs = url.search || "";
+    const upstream = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart${qs}`;
+    try {
+      const headers = { Accept: "application/json" };
+      const cgKey = process.env.COINGECKO_API_KEY;
+      if (cgKey && String(cgKey).trim()) {
+        headers["x-cg-demo-api-key"] = String(cgKey).trim();
+      }
+      const r = await fetch(upstream, { headers, signal: AbortSignal.timeout(60000) });
+      const body = await r.text();
+      res.writeHead(r.status, { "Content-Type": "application/json" });
+      res.end(body);
+    } catch (e) {
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e?.message || String(e) }));
+    }
+    return;
+  }
+
+  /** Trend page: persist latest computed stats for the agent (trend_snapshot_read). */
+  if (path === "/api/trend/stats" && req.method === "POST") {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    if (body.length > 262144) {
+      res.writeHead(413, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Body too large" }));
+      return;
+    }
+    let client;
+    try {
+      client = JSON.parse(body || "{}");
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Invalid JSON" }));
+      return;
+    }
+    if (!client || typeof client !== "object" || Array.isArray(client)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Expected a JSON object" }));
+      return;
+    }
+    if (Number(client.schema_version) !== 1) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "schema_version must be 1" }));
+      return;
+    }
+    const record = {
+      schema_version: 1,
+      server_received_at: new Date().toISOString(),
+      client,
+    };
+    try {
+      const w = await trendSnapshot.writeTrendSnapshotRecord(record);
+      if (!w.ok) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: w.error || "Write failed" }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, path: w.path }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e?.message || String(e) }));
+    }
+    return;
+  }
+
   // Note: Quick Start is rendered from a UI-embedded page, not from docs/*.md.
   if (path === "/api/solana-rpc/test" && (req.method === "GET" || req.method === "POST")) {
     const rpcUrl = configSolanaRpc || process.env.SOLANA_RPC_URL || DEFAULT_SOLANA_RPC;
