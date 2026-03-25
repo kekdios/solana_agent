@@ -1,0 +1,23 @@
+{
+  "updated_at": "2026-03-25T01:09:52.597Z",
+  "hl": {
+    "btc_key": "@142",
+    "eth_key": "@151",
+    "btc_usd": 70752.5,
+    "eth_usd": 2161.25
+  },
+  "sbtc": {
+    "deviation_bps": -81.18194992258188,
+    "pool_usd_per_base": 70178.11740881026,
+    "hl_usd": 70752.5,
+    "suggested_action": "none",
+    "dry_run": null
+  },
+  "saeth": {
+    "deviation_bps": -56.67832967028996,
+    "pool_usd_per_base": 2149.0003960000085,
+    "hl_usd": 2161.25,
+    "suggested_action": "none",
+    "dry_run": null
+  }
+}

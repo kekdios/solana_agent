@@ -38,6 +38,12 @@ This script (`scripts/verify-treasury-trade-path.js`) uses **only** the Orca Whi
 - **LP** remains out of scope until specified.
 - **Wallet “Agent” badge:** successful live **`treasury_pool_swap`** txs are written to **`swap_intents`** (status `succeeded` + signature), same table as **`jupiter_swap_execute`**, so the Wallet panel can flag them as agent-executed.
 
+## **Trading** dashboard page
+
+See **`docs/PLAN_TRADING_PAGE.md`**. Sidebar **Trading**: snapshot **Hyperliquid** spot UBTC/UETH (`@142` / `@151`) and Orca **treasury_pool_info** for both pools into **`data/solagent.db`**; **Refresh snapshot** → **`POST /api/trading/snapshot`**. **Peg monitor** section: **`GET /api/trading/peg-monitor`** (resolved **`PEG_MONITOR_*`**, last run from **`trading_dashboard_meta`**), **Run peg check** → **`POST /api/trading/peg-monitor/run`** (same logic as **`peg_monitor_tick`** / cron **`peg_monitor`**; **dry-run** swaps only). Wallet address + **SABTC / SAETH / SAUSD** balances; private key never shown (server-side only).
+
+---
+
 ## Periodic peg checks (`HEARTBEAT.md`)
 
 For **automated agent turns** that re-check pool vs reference prices (**`hyperliquid_price`**: perp mids by default; use **`market: "spot"`** for HL spot pair mids where applicable), use the **chat heartbeat**: set **`HEARTBEAT_INTERVAL_SECONDS`** in Settings → Environment and keep the **Chat** view open. The model reads **`workspace/HEARTBEAT.md`** when the default heartbeat user message fires. The repository ships a default checklist in **`workspace/HEARTBEAT.md`** (SABTC/SAETH vs HL, balances, dry-run swap, logging); edit under your **`WORKSPACE_DIR`**. **V3:** If the user asks directly for the **text** of `heartbeat.md`, the server may inject the file from disk before the LLM (see root **README.md**). The **`cronjob`** task **`heartbeat`** is **only** a server health log—it does **not** run this checklist.

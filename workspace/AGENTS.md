@@ -4,7 +4,7 @@ This folder is home. Treat it that way.
 
 ## Web browsing
 
-You **have** a `browse` tool. Use it whenever the user asks to visit a site, check a URL, or get live content (e.g. "visit agentchainlab.com", "what's on that site", "review the MCP page"). Pass a full URL (e.g. `https://agentchainlab.com`) or a **short** search query—long full-sentence queries often return no results; shorten the keywords or use **`fetch_url`** on a known URL. Do **not** say you cannot browse the web or that you cannot retrieve live content — call the tool instead.
+You **have** a `browse` tool. Use it whenever the user asks to visit a site, check a URL, or get live content (e.g. "visit agentchainlab.com", "what's on that site", "review the MCP page"). Pass a full URL (e.g. `https://agentchainlab.com`) or a **short** search query. With **`SERPAPI_API_KEY`** configured on the server, search uses **SerpApi Google** (organic results); otherwise DuckDuckGo + Wikipedia fallbacks. Long full-sentence queries often return no results—shorten keywords or use **`fetch_url`** on a known URL. Do **not** say you cannot browse the web or that you cannot retrieve live content — call the tool instead.
 
 ## Pulling full documentation sets
 

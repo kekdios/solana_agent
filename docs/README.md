@@ -11,6 +11,7 @@
 | **QUICK_START.md** | Owner/operator quick start: keys, wallet, tiers, swaps, backups, V3 chat notes. |
 | **SA_AGENT_TOKENS.md** | Native agent SPL send, canonical mints, treasury pool tools; external reference pricing via **`hyperliquid_price`** (perp default, optional **`market: "spot"`**). |
 | **TREASURY_POOL_TRADING.md** | SABTC/SAETH/SAUSD Whirlpool, `treasury_pool_swap`, `HEARTBEAT.md` peg checklist notes. |
+| **PLAN_TRADING_PAGE.md** | **Trading** UI: Orca + HL spot snapshots, **`/api/trading/*`**, **peg monitor** panel (**`GET/POST …/peg-monitor`**, **`PEG_MONITOR_*`** from **`.env`**, last run in DB), wallet strip. Optional **`SERPAPI_API_KEY`** improves **`browse`** (see **TOOLS.md**). |
 | **agent-prediction-arena-plan.md** | Future design notes (agent-vs-agent arena; not shipped). |
 | **Heartbeat** | **`workspace/HEARTBEAT.md`** + **`HEARTBEAT_INTERVAL_SECONDS`**. Cron **`heartbeat`** task ≠ model checklist. Server may return HEARTBEAT file content directly for explicit “content of heartbeat.md” questions—see root **README.md** (Chat V3). |
 

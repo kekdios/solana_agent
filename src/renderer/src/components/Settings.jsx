@@ -141,11 +141,12 @@ export default function Settings({ onClose }) {
   };
 
   const fetchNanogptModels = useCallback(async () => {
-    if (!apiBase) return;
+    /** Same origin as chat: `apiBase` is often "" (App never sets a host); `/api/...` still works. */
+    const base = apiBase || "";
     setNanogptModelsLoading(true);
     setNanogptModelsError(null);
     try {
-      const res = await fetch(`${apiBase}/api/nanogpt/models?detailed=true`);
+      const res = await fetch(`${base}/api/nanogpt/models?detailed=true`);
       const data = await res.json();
       const rawList = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
       if (data.ok && rawList.length > 0) {
@@ -175,10 +176,10 @@ export default function Settings({ onClose }) {
   }, [apiBase]);
 
   useEffect(() => {
-    if (apiBase && config?.NANOGPT_API_KEY?.status === "CONNECTED") {
+    if (config?.NANOGPT_API_KEY?.status === "CONNECTED") {
       fetchNanogptModels();
     }
-  }, [apiBase, config?.NANOGPT_API_KEY?.status, fetchNanogptModels]);
+  }, [config?.NANOGPT_API_KEY?.status, fetchNanogptModels]);
 
   const currentNanogptModel = config?.nanogptModel || DEFAULT_NANOGPT_MODEL;
   const nanogptModelOptions = useMemo(() => {
@@ -722,8 +723,21 @@ export default function Settings({ onClose }) {
                 <SettingsStoreBadge settingKey="NANOGPT_MODEL" />
               </div>
               <p className="text-xs text-slate-500">
+                <strong className="text-slate-400">Not in this app:</strong> There is no “Also show paid models”
+                toggle in Solana Agent. If NanoGPT documents that option, it is on the{" "}
+                <a
+                  href="https://nano-gpt.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-emerald-400/90 hover:text-emerald-300 underline"
+                >
+                  nano-gpt.com
+                </a>{" "}
+                site after you sign in (account / API preferences — labels vary by their UI).
+              </p>
+              <p className="text-xs text-slate-500">
                 List from this app:{" "}
-                <code className="text-slate-400">GET /api/nanogpt/models</code> (proxies NanoGPT’s{" "}
+                <code className="text-slate-400">GET /api/nanogpt/models</code> — merges NanoGPT’s{" "}
                 <a
                   href="https://docs.nano-gpt.com/api-reference/endpoint/models"
                   target="_blank"
@@ -731,8 +745,10 @@ export default function Settings({ onClose }) {
                   className="text-emerald-400/90 hover:text-emerald-300 underline"
                 >
                   /api/v1/models
-                </a>
-                ). Save your API key first, then Refresh.
+                </a>{" "}
+                (with your key) and{" "}
+                <code className="text-slate-400">/api/paid/v1/models</code> so the dropdown can include paid models
+                without that website setting. Save your API key, then Refresh.
               </p>
               {!nanogptConnected ? (
                 <p className="text-sm text-slate-500">Configure a NanoGPT API key above to load models.</p>

@@ -105,7 +105,7 @@ tools:
     enabled: true
 
   - name: cronjob
-    description: Schedule a recurring task with a cron expression. Task must be one of log, heartbeat, check_btc. Use expression '0 * * * *' for every hour (e.g. for check_btc to monitor Bitcoin price). Example '*/5 * * * *' = every 5 minutes.
+    description: Schedule a recurring task with a cron expression. Tasks log, heartbeat, check_btc, or peg_monitor (HL vs Orca peg dry-runs + balance/cleanup; requires Tier 4 wallet/RPC). Example hourly peg check expression '0 * * * *' with task peg_monitor.
     module: ./tools/cronjob.js
     handler: scheduleCron
     enabled: true
@@ -216,6 +216,13 @@ tools:
   - name: treasury_pool_info
     description: |
       **Read-only** Whirlpool snapshot for treasury pools (**pair:** `SABTC_SAUSD` default or `SAETH_SAUSD`) or **pool_address**. Reads Orca data and falls back to **on-chain** decode (vault balances, spot price as token B per 1 token A, tick, liquidity, fees). Use for market-making context; **not** an executable quote—use **treasury_pool_swap** with **dry_run:true** to simulate a trade size. **Read-only; allowed at Tier 2+** (not a swap send).
+    enabled: true
+
+  - name: peg_monitor_tick
+    description: |
+      Run one **peg-monitor** cycle: Hyperliquid spot (UBTC/UETH keys) vs Orca **SABTC_SAUSD** / **SAETH_SAUSD** implied USD; deviation in **basis points**; when |bps| exceeds threshold (default 100), runs **treasury_pool_swap** with **dry_run:true** only. Writes **memory/peg-state.json**, **memory/heartbeat-state.json**, appends **memory/YYYY-MM-DD.md** on alerts/actions. Alternates **full** vs **quick** ticks (quick = SOL low check, clear_expired_swap_intents, last-5 tx errors). Optional **force_full**. Does **not** broadcast swaps—live execution requires explicit **treasury_pool_swap** without dry_run. **Tier 4.**
+    module: ./tools/peg-monitor.js
+    handler: runPegMonitorTick
     enabled: true
 
   - name: solana_tx_history

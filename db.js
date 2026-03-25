@@ -111,6 +111,172 @@ if (!hasColumn("messages", "tool_results")) {
   db.exec(`ALTER TABLE messages ADD COLUMN tool_results TEXT;`);
 }
 
+/** Trading dashboard: Hyperliquid spot (UBTC/UETH) + Orca pool snapshots. */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS trading_hl_spot_snapshot (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    btc_price REAL,
+    eth_price REAL,
+    btc_hl_key TEXT,
+    eth_hl_key TEXT,
+    btc_label TEXT,
+    eth_label TEXT,
+    raw_json TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_trading_hl_created ON trading_hl_spot_snapshot(created_at DESC);
+  CREATE TABLE IF NOT EXISTS trading_pool_snapshot (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    pair TEXT NOT NULL,
+    pool_address TEXT,
+    snapshot_json TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_trading_pool_pair_created ON trading_pool_snapshot(pair, created_at DESC);
+  CREATE TABLE IF NOT EXISTS trading_dashboard_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+const TRADING_MAX_ROWS = 8000;
+
+function pruneTradingTable(table) {
+  try {
+    const c = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get();
+    const n = c?.n ?? 0;
+    if (n <= TRADING_MAX_ROWS) return;
+    const row = db.prepare(`SELECT id FROM ${table} ORDER BY id DESC LIMIT 1 OFFSET ?`).get(TRADING_MAX_ROWS - 1);
+    if (row?.id != null) {
+      db.prepare(`DELETE FROM ${table} WHERE id < ?`).run(row.id);
+    }
+  } catch (_) {}
+}
+
+export function insertTradingHlSpotSnapshot(row) {
+  const stmt = db.prepare(
+    `INSERT INTO trading_hl_spot_snapshot (btc_price, eth_price, btc_hl_key, eth_hl_key, btc_label, eth_label, raw_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  );
+  stmt.run(
+    row.btc_price ?? null,
+    row.eth_price ?? null,
+    row.btc_hl_key ?? null,
+    row.eth_hl_key ?? null,
+    row.btc_label ?? null,
+    row.eth_label ?? null,
+    row.raw_json ?? null
+  );
+  pruneTradingTable("trading_hl_spot_snapshot");
+  return { ok: true };
+}
+
+export function insertTradingPoolSnapshot(row) {
+  const stmt = db.prepare(
+    `INSERT INTO trading_pool_snapshot (pair, pool_address, snapshot_json) VALUES (?, ?, ?)`
+  );
+  stmt.run(row.pair, row.pool_address ?? null, typeof row.snapshot_json === "string" ? row.snapshot_json : JSON.stringify(row.snapshot_json));
+  pruneTradingTable("trading_pool_snapshot");
+  return { ok: true };
+}
+
+export function setTradingMeta(key, value) {
+  const k = String(key || "").trim();
+  if (!k) return;
+  db.prepare(
+    `INSERT INTO trading_dashboard_meta (key, value, updated_at) VALUES (?, ?, datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
+  ).run(k, String(value ?? ""));
+}
+
+/** Read a single trading_dashboard_meta row (e.g. peg monitor last run). */
+export function getTradingMeta(key) {
+  const k = String(key || "").trim();
+  if (!k) return null;
+  const row = db.prepare(`SELECT value, updated_at FROM trading_dashboard_meta WHERE key = ?`).get(k);
+  if (!row) return null;
+  return { value: row.value, updated_at: row.updated_at };
+}
+
+export function getTradingHlHistory(opts = {}) {
+  const limit = Math.min(500, Math.max(1, Number(opts.limit) || 200));
+  const rows = db
+    .prepare(
+      `SELECT id, created_at, btc_price, eth_price, btc_hl_key, eth_hl_key, btc_label, eth_label
+       FROM trading_hl_spot_snapshot ORDER BY id DESC LIMIT ?`
+    )
+    .all(limit);
+  return rows.reverse();
+}
+
+export function getTradingPoolHistory(pair, opts = {}) {
+  const limit = Math.min(500, Math.max(1, Number(opts.limit) || 200));
+  const p = String(pair || "").trim();
+  if (!p) return [];
+  const rows = db
+    .prepare(
+      `SELECT id, created_at, pair, pool_address, snapshot_json
+       FROM trading_pool_snapshot WHERE pair = ? ORDER BY id DESC LIMIT ?`
+    )
+    .all(p, limit);
+  return rows.reverse().map((r) => ({
+    ...r,
+    data: safeJsonParse(r.snapshot_json),
+  }));
+}
+
+function safeJsonParse(s) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+export function getTradingLatestSnapshots() {
+  /** Omit `raw_json` (large; not needed by UI) — including it could make JSON.stringify fail on edge payloads. */
+  const hl = db
+    .prepare(
+      `SELECT id, created_at, btc_price, eth_price, btc_hl_key, eth_hl_key, btc_label, eth_label
+       FROM trading_hl_spot_snapshot ORDER BY id DESC LIMIT 1`
+    )
+    .get();
+  const sabtc = db
+    .prepare(
+      `SELECT id, created_at, pair, pool_address, snapshot_json FROM trading_pool_snapshot WHERE pair = ? ORDER BY id DESC LIMIT 1`
+    )
+    .get("SABTC_SAUSD");
+  const saeth = db
+    .prepare(
+      `SELECT id, created_at, pair, pool_address, snapshot_json FROM trading_pool_snapshot WHERE pair = ? ORDER BY id DESC LIMIT 1`
+    )
+    .get("SAETH_SAUSD");
+  return {
+    hl: hl || null,
+    pools: {
+      SABTC_SAUSD: sabtc
+        ? {
+            id: sabtc.id,
+            created_at: sabtc.created_at,
+            pair: sabtc.pair,
+            pool_address: sabtc.pool_address,
+            data: safeJsonParse(sabtc.snapshot_json),
+          }
+        : null,
+      SAETH_SAUSD: saeth
+        ? {
+            id: saeth.id,
+            created_at: saeth.created_at,
+            pair: saeth.pair,
+            pool_address: saeth.pool_address,
+            data: safeJsonParse(saeth.snapshot_json),
+          }
+        : null,
+    },
+  };
+}
+
 export function createConversation() {
   const stmt = db.prepare("INSERT INTO conversations DEFAULT VALUES");
   const result = stmt.run();
@@ -525,6 +691,7 @@ const ENV_MANAGED_KEYS = new Set([
   "NANOGPT_API_KEY",
   "NANOGPT_MODEL",
   "JUPITER_API_KEY",
+  "SERPAPI_API_KEY",
   "NOSTR_NPUB",
   "NOSTR_NSEC",
   "NOSTR_RELAYS",

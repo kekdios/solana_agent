@@ -459,142 +459,144 @@ export default function ChatArea() {
   };
 
   return (
-    <main className="flex-1 flex flex-col min-w-0 bg-[#0d0d0f]">
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 && (
-          <div className="text-center text-slate-500 py-12">
-            <p className="text-sm">Send a message or use /save, /history, /help</p>
-          </div>
-        )}
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={`flex flex-col gap-1 ${m.role === "user" ? "items-end" : "items-start"}`}
-          >
-            {m.role === "assistant" && m.tool_results && m.tool_results.length > 0 && (
-              <div
-                className="max-w-[80%] rounded-xl border border-[#2a2a30] bg-[#0d0d0f]/80 px-3 py-2 text-xs text-slate-500"
-                aria-label="Agent steps"
-              >
-                <span className="font-medium text-slate-400 uppercase tracking-wider">What the agent did</span>
-                <ul className="mt-1.5 space-y-1">
-                  {m.tool_results.map((tr, j) => (
-                    <li key={j} className="flex items-center gap-2">
-                      <span className="text-emerald-500/80" aria-hidden>✓</span>
-                      <span className="font-mono text-slate-400">{tr.tool}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            <div className={`flex ${m.role === "user" ? "justify-end" : "justify-start"} w-full max-w-[80%]`}>
-              <div
-                className={`group relative rounded-2xl px-4 py-2.5 text-sm w-full ${
-                  m.role === "user"
-                    ? "bg-emerald-600/80 text-white"
-                    : "bg-[#1a1a1e] border border-[#2a2a30] text-slate-200"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <span className="font-medium text-xs opacity-80">
-                    {m.role === "user" ? "You" : "Agent"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => copyMessage(m.content || "", `msg-${i}`)}
-                    className="p-1 rounded-md opacity-60 hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-white/50"
-                    title="Copy message"
-                    aria-label="Copy message"
-                  >
-                    {copiedId === `msg-${i}` ? (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    ) : (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h2m8 0h2a2 2 0 012 2v2m2 4a2 2 0 01-2 2h-2m-6-12h2a2 2 0 012 2v6a2 2 0 01-2 2h-2z" />
-                      </svg>
-                    )}
-                  </button>
+    <main className="flex-1 flex flex-col min-h-0 min-w-0 bg-[#0d0d0f]">
+      <div className="flex-1 flex flex-col min-h-0 max-w-2xl mx-auto w-full">
+        <div className="flex-1 overflow-y-auto px-6 pt-6 pb-4 space-y-4">
+          {messages.length === 0 && (
+            <div className="text-center text-slate-500 py-12">
+              <p className="text-sm">Send a message or use /save, /history, /help</p>
+            </div>
+          )}
+          {messages.map((m, i) => (
+            <div
+              key={i}
+              className={`flex flex-col gap-1 ${m.role === "user" ? "items-end" : "items-start"}`}
+            >
+              {m.role === "assistant" && m.tool_results && m.tool_results.length > 0 && (
+                <div
+                  className="max-w-[80%] rounded-xl border border-[#2a2a30] bg-[#0d0d0f]/80 px-3 py-2 text-xs text-slate-500"
+                  aria-label="Agent steps"
+                >
+                  <span className="font-medium text-slate-400 uppercase tracking-wider">What the agent did</span>
+                  <ul className="mt-1.5 space-y-1">
+                    {m.tool_results.map((tr, j) => (
+                      <li key={j} className="flex items-center gap-2">
+                        <span className="text-emerald-500/80" aria-hidden>✓</span>
+                        <span className="font-mono text-slate-400">{tr.tool}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <div className="break-words">
-                  <MessageContent content={m.content} role={m.role} />
+              )}
+              <div className={`flex ${m.role === "user" ? "justify-end" : "justify-start"} w-full max-w-[80%]`}>
+                <div
+                  className={`group relative rounded-2xl px-4 py-2.5 text-sm w-full ${
+                    m.role === "user"
+                      ? "bg-emerald-600/80 text-white"
+                      : "bg-[#1a1a1e] border border-[#2a2a30] text-slate-200"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="font-medium text-xs opacity-80">
+                      {m.role === "user" ? "You" : "Agent"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => copyMessage(m.content || "", `msg-${i}`)}
+                      className="p-1 rounded-md opacity-60 hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-white/50"
+                      title="Copy message"
+                      aria-label="Copy message"
+                    >
+                      {copiedId === `msg-${i}` ? (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h2m8 0h2a2 2 0 012 2v2m2 4a2 2 0 01-2 2h-2m-6-12h2a2 2 0 012 2v6a2 2 0 01-2 2h-2z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                  <div className="break-words">
+                    <MessageContent content={m.content} role={m.role} />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ))}
-        {error && (
-          <div className="rounded-xl px-4 py-2.5 bg-red-500/20 border border-red-500/30 text-red-400 text-sm">
-            {error}
-          </div>
-        )}
-        {loading && (
-          <div className="flex justify-start" aria-live="polite">
-            <div className="thinking-indicator">
-              <img src="/loading-animation.gif" alt="" width={24} height={24} />
+          ))}
+          {error && (
+            <div className="rounded-xl px-4 py-2.5 bg-red-500/20 border border-red-500/30 text-red-400 text-sm">
+              {error}
             </div>
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
-      <div className="px-4 pt-2 border-t border-[#1e1e24] space-y-3">
-        {(() => {
-          const allPrepareResults = [];
-          for (const m of messages) {
-            if (m.role !== "assistant" || !Array.isArray(m.tool_results)) continue;
-            for (const tr of m.tool_results) {
-              if (tr?.tool === "jupiter_swap_prepare" && tr?.result && typeof tr.result === "object" && tr.result?.ok && typeof tr.result.intent_id === "string") {
-                allPrepareResults.push(tr.result);
+          )}
+          {loading && (
+            <div className="flex justify-start" aria-live="polite">
+              <div className="thinking-indicator">
+                <img src="/loading-animation.gif" alt="" width={24} height={24} />
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+        <div className="shrink-0 px-6 pb-6 pt-2 border-t border-[#1e1e24] space-y-3">
+          {(() => {
+            const allPrepareResults = [];
+            for (const m of messages) {
+              if (m.role !== "assistant" || !Array.isArray(m.tool_results)) continue;
+              for (const tr of m.tool_results) {
+                if (tr?.tool === "jupiter_swap_prepare" && tr?.result && typeof tr.result === "object" && tr.result?.ok && typeof tr.result.intent_id === "string") {
+                  allPrepareResults.push(tr.result);
+                }
               }
             }
-          }
-          const latest = allPrepareResults.length > 0 ? allPrepareResults[allPrepareResults.length - 1] : null;
-          if (!latest) return null;
-          return (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-              <div className="font-medium uppercase tracking-wider text-amber-200/90 mb-1">Latest prepared swap</div>
-              <div className="font-mono break-all text-amber-100">{latest.intent_id}</div>
-              <div className="mt-1 text-amber-200/80">
-                SOL → USDC • in: <span className="font-mono">{latest.inAmount}</span> • min out:{" "}
-                <span className="font-mono">{latest.minOutAmount}</span> • slippage: <span className="font-mono">{latest.slippageBps}</span> bps
+            const latest = allPrepareResults.length > 0 ? allPrepareResults[allPrepareResults.length - 1] : null;
+            if (!latest) return null;
+            return (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                <div className="font-medium uppercase tracking-wider text-amber-200/90 mb-1">Latest prepared swap</div>
+                <div className="font-mono break-all text-amber-100">{latest.intent_id}</div>
+                <div className="mt-1 text-amber-200/80">
+                  SOL → USDC • in: <span className="font-mono">{latest.inAmount}</span> • min out:{" "}
+                  <span className="font-mono">{latest.minOutAmount}</span> • slippage: <span className="font-mono">{latest.slippageBps}</span> bps
+                </div>
+                <div className="mt-1 text-amber-200/70">
+                  Expires: <span className="font-mono">{latest.expires_at}</span>
+                </div>
               </div>
-              <div className="mt-1 text-amber-200/70">
-                Expires: <span className="font-mono">{latest.expires_at}</span>
-              </div>
+            );
+          })()}
+          <form onSubmit={handleSubmit} className="space-y-2">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Message… (Shift+Enter for new line) (/save, /history, /help)"
+              rows={1}
+              className="w-full min-h-[42px] max-h-32 resize-y rounded-xl bg-[#1a1a1e] border border-[#2a2a30] px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 text-sm"
+              disabled={loading}
+            />
+            <div className="flex gap-2 items-center justify-end">
+              {loading ? (
+                <button
+                  type="button"
+                  onClick={stopChat}
+                  className="px-2 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition"
+                >
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!input.trim()}
+                  className="px-2 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition"
+                >
+                  Send
+                </button>
+              )}
             </div>
-          );
-        })()}
-        <form onSubmit={handleSubmit} className="space-y-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Message… (Shift+Enter for new line) (/save, /history, /help)"
-            rows={1}
-            className="w-full min-h-[42px] max-h-32 resize-y rounded-xl bg-[#1a1a1e] border border-[#2a2a30] px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 text-sm"
-            disabled={loading}
-          />
-          <div className="flex gap-2 items-center justify-end">
-            {loading ? (
-              <button
-                type="button"
-                onClick={stopChat}
-                className="px-2 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition"
-              >
-                Stop
-              </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={!input.trim()}
-                className="px-2 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition"
-              >
-                Send
-              </button>
-            )}
-          </div>
-        </form>
+          </form>
+        </div>
       </div>
     </main>
   );

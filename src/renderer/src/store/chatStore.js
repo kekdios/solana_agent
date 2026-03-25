@@ -48,7 +48,7 @@ export const useChatStore = create((set, get) => ({
   usageTotal: null,
   /** Session token total (current app session only). */
   sessionTokenTotal: 0,
-  /** Main content view: "chat" | "quickStart" | "wallet" | "nostr" | "allMessages" | "nanogpt". */
+  /** Main content view: "chat" | "quickStart" | "wallet" | "trading" | "nostr" | "allMessages" | "nanogpt". */
   view: "chat",
   /** Solana network from config: "testnet" | "devnet" | "mainnet". */
   solanaNetwork: "testnet",
@@ -104,6 +104,8 @@ export const useChatStore = create((set, get) => ({
           ? "quickStart"
           : view === "wallet"
           ? "wallet"
+          : view === "trading"
+          ? "trading"
           : view === "nostr"
           ? "nostr"
           : view === "allMessages"

@@ -2,10 +2,13 @@
  * Web-browsing tool: live search + fetch first result page.
  * Returns JSON with title, url, snippet, excerpt (optional), timestamp.
  *
- * DuckDuckGo Instant Answer often returns nothing for full-sentence queries
- * ("find out more about nostr") while keyword queries work — we simplify the
- * query and fall back to Wikipedia opensearch (no API key; requires User-Agent).
+ * When SERPAPI_API_KEY is set (see .env / db.getConfig), uses SerpApi Google
+ * organic results, then fetches the best matching page. Otherwise: DuckDuckGo
+ * Instant Answer (often empty for long queries), Wikipedia opensearch, domain
+ * heuristic — with simplified query variants where helpful.
  */
+
+import { getConfig } from "../db.js";
 
 const SNIPPET_MAX = 500;   // max length for the short snippet (chars)
 const EXCERPT_MAX = 2000; // max length for the longer excerpt (chars)
@@ -14,16 +17,7 @@ const EXCERPT_MAX = 2000; // max length for the longer excerpt (chars)
 const BROWSE_USER_AGENT = "SolanaAgent/3.0 (browse-tool)";
 
 /**
- * Main entry point – given a free-form query, it:
- * 1. Calls DuckDuckGo's Instant Answer API (no API key required).
- * 2. Pulls a title, URL and a short snippet from the API response.
- * 3. If the API didn't return a direct URL, falls back to the first
- *    related-topic entry that has a FirstURL.
- * 4. Fetches the target page (with a short timeout) and extracts a
- *    plain-text excerpt by stripping HTML.
- * 5. Returns a compact JSON payload.
- *
- * @param {string} query – user search term
+ * @param {string} query – search phrase or full https URL
  * @returns {Promise<Object>} { title, url, snippet, excerpt, timestamp }
  */
 /** True if the query looks like a full URL we can fetch directly. */
@@ -147,6 +141,86 @@ async function duckDuckGoInstantAnswer(q) {
   return { title: title || "Result", url, snippet };
 }
 
+function getSerpApiKey() {
+  try {
+    const v = getConfig("SERPAPI_API_KEY");
+    const s = v != null ? String(v).trim() : "";
+    if (s) return s;
+  } catch {
+    /* ignore */
+  }
+  return String(process.env.SERPAPI_API_KEY || "").trim();
+}
+
+/** SerpApi Google search — returns organic_results entries or empty. */
+async function serpGoogleOrganicResults(searchQuery, apiKey) {
+  const u = new URL("https://serpapi.com/search.json");
+  u.searchParams.set("engine", "google");
+  u.searchParams.set("q", searchQuery);
+  u.searchParams.set("api_key", apiKey);
+  u.searchParams.set("num", "8");
+  const r = await fetch(u.toString(), {
+    headers: { "User-Agent": BROWSE_USER_AGENT },
+    signal: AbortSignal.timeout(20000),
+  });
+  let j;
+  try {
+    j = await r.json();
+  } catch {
+    return { organic: [], serpError: "invalid JSON" };
+  }
+  if (j && j.error) return { organic: [], serpError: String(j.error) };
+  const organic = Array.isArray(j.organic_results) ? j.organic_results : [];
+  return { organic };
+}
+
+async function enrichBrowseResult(title, url, snippet) {
+  let excerpt = String(snippet || "").trim();
+  try {
+    const pageRes = await fetch(url, {
+      headers: { "User-Agent": BROWSE_USER_AGENT },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (pageRes.ok) {
+      const text = await pageRes.text();
+      const extracted = stripHtml(text).slice(0, EXCERPT_MAX);
+      if (extracted.length > excerpt.length) excerpt = extracted;
+    }
+  } catch {
+    /* keep snippet */
+  }
+  const sn = String(snippet || "").trim().slice(0, SNIPPET_MAX);
+  return {
+    title: (title || url).slice(0, 200),
+    url,
+    snippet: sn || excerpt.slice(0, SNIPPET_MAX),
+    excerpt: excerpt.slice(0, EXCERPT_MAX),
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/** Try SerpApi for each query variant; fetch first usable organic link. */
+async function browseViaSerpApi(queries, apiKey) {
+  for (const qq of queries) {
+    if (!qq) continue;
+    try {
+      const { organic, serpError } = await serpGoogleOrganicResults(qq, apiKey);
+      if (serpError && (!organic || !organic.length)) continue;
+      const items = (organic || []).filter(
+        (o) => o && typeof o.link === "string" && /^https?:\/\//i.test(o.link.trim())
+      );
+      for (const item of items.slice(0, 5)) {
+        const link = item.link.trim();
+        if (/^https?:\/\/(www\.)?google\./i.test(link)) continue;
+        return await enrichBrowseResult(item.title || qq, link, item.snippet || "");
+      }
+    } catch {
+      /* next query or fall through */
+    }
+  }
+  return null;
+}
+
 export async function browse(query) {
   // -----------------------------------------------------------------
   // 1️⃣ Normalise the query string
@@ -163,7 +237,20 @@ export async function browse(query) {
   const queries = [...new Set([q, simplified].filter((s) => s && s.length > 0))];
 
   // -----------------------------------------------------------------
-  // 2️⃣ DuckDuckGo Instant Answer (try original + simplified query)
+  // 2️⃣ SerpApi Google (when API key configured)
+  // -----------------------------------------------------------------
+  const serpKey = getSerpApiKey();
+  if (serpKey) {
+    try {
+      const serpHit = await browseViaSerpApi(queries, serpKey);
+      if (serpHit) return serpHit;
+    } catch {
+      /* fall back to DDG / Wikipedia */
+    }
+  }
+
+  // -----------------------------------------------------------------
+  // 3️⃣ DuckDuckGo Instant Answer (try original + simplified query)
   // -----------------------------------------------------------------
   let title = "Untitled";
   let url = "";
@@ -183,7 +270,7 @@ export async function browse(query) {
   }
 
   // -----------------------------------------------------------------
-  // 3️⃣ Wikipedia opensearch (works when DDG IA is empty for long queries)
+  // 4️⃣ Wikipedia opensearch (works when DDG IA is empty for long queries)
   // -----------------------------------------------------------------
   if (!url) {
     for (const qq of queries) {
@@ -202,7 +289,7 @@ export async function browse(query) {
   }
 
   // -----------------------------------------------------------------
-  // 4️⃣ Domain heuristic (e.g. "check agentchainlab.com")
+  // 5️⃣ Domain heuristic (e.g. "check agentchainlab.com")
   // -----------------------------------------------------------------
   if (!url) {
     const domainMatch = q.match(
@@ -228,30 +315,9 @@ export async function browse(query) {
   }
 
   // -----------------------------------------------------------------
-  // 5️⃣ Fetch the target page and extract a longer excerpt
+  // 6️⃣ Fetch the target page and extract a longer excerpt
   // -----------------------------------------------------------------
-  let excerpt = snippet;
-  try {
-    const pageRes = await fetch(url, {
-      headers: { "User-Agent": BROWSE_USER_AGENT },
-      signal: AbortSignal.timeout(6000), // 6 s for page fetch
-    });
-    if (pageRes.ok) {
-      const text = await pageRes.text();
-      const extracted = stripHtml(text).slice(0, EXCERPT_MAX);
-      if (extracted.length > excerpt.length) excerpt = extracted;
-    }
-  } catch {
-    // keep snippet only
-  }
-
-  return {
-    title,
-    url,
-    snippet: snippet.slice(0, SNIPPET_MAX),
-    excerpt: excerpt.slice(0, EXCERPT_MAX),
-    timestamp: new Date().toISOString(),
-  };
+  return await enrichBrowseResult(title, url, snippet);
 }
 
 /** Strip scripts, styles, tags and common HTML entities to get plain text. */

@@ -35,7 +35,8 @@
 | **Sandbox / exec** – run shell commands in the workspace (create programs with workspace_write, then run them) | `exec` |
 | **Memory** – past conversations | `conversation_search` |
 | **Nostr gateway** – single entrypoint with strict action contracts. Publish/read/reply/react/profile via `type` + `payload`. | `nostr_action` |
-| **Web / API** – browse (prefer **short keywords** or full **`https://` URL**), fetch URL | `browse`, `fetch_url` |
+| **Web / API** – browse (**SerpApi Google** if **`SERPAPI_API_KEY`**, else DDG/Wikipedia); **`https://` URL** fetch | `browse`, `fetch_url` |
+| **Treasury peg bot** – HL spot vs Orca pool deviation, **dry-run** swaps only; logs **`memory/`**; **Tier 4** | **`peg_monitor_tick`**; schedule **`cronjob`** task **`peg_monitor`**; Trading UI **Run peg check**; CLI **`npm run peg-monitor`** |
 
 ---
 
@@ -43,7 +44,7 @@
 
 | Category   | Command / Tool      | Short description                                              | Example usage                          |
 | ---------- | ------------------- | -------------------------------------------------------------- | -------------------------------------- |
-| **Core**   | `browse`             | Search DuckDuckGo or fetch a URL; return title, snippet, excerpt. | `browse("Bitcoin price")` or `browse("https://example.com")` |
+| **Core**   | `browse`             | Search (SerpApi Google if `SERPAPI_API_KEY`, else DDG/Wikipedia) or fetch a URL; return title, snippet, excerpt. | `browse("Bitcoin price")` or `browse("https://example.com")` |
 | **Core**   | `generate_image`    | Generate a raster image from a text prompt (diffusion).        | `generate_image({ prompt: "a sunrise over mountains" })` |
 | **Core**   | `analyze_image`     | OCR / description of an uploaded image by file-id.             | `analyze_image({ file_id: "…", prompt: "Extract text" })` |
 | **Core**   | `file_write`        | Store a file (filename + content); returns file-id.            | `file_write({ filename: "notes.txt", content: "…" })` |
@@ -54,7 +55,7 @@
 | **Utility**| `/help`             | Show slash-command help.                                       | `/help` |
 | **Utility**| New chat (menu)     | Start a fresh session (clear messages and conversation).        | Sidebar → New chat                     |
 | **Health** | `heartbeat`         | Health-check payload (timestamp, status, memory, pid).         | `heartbeat({})` |
-| **Schedule**| `cronjob`          | Schedule a recurring task (cron expression + task name).       | `cronjob({ expression: "*/5 * * * *", task: "heartbeat" })` |
+| **Schedule**| `cronjob`          | Schedule a recurring task: **`log`**, **`heartbeat`**, **`check_btc`**, **`peg_monitor`** (peg monitor = Tier 4 to schedule). | `cronjob({ expression: "0 * * * *", task: "peg_monitor" })` |
 | **Doc**     | `doc_crawl`        | Crawl a docs site; save .md + metadata + TOC to workspace.     | `doc_crawl({ base_url: "https://docs.example.com", save_to: "docs/example", max_pages: 30 })` |
 | **Doc**     | `doc_index`        | Build/refresh SQLite FTS index for a workspace docs folder.   | `doc_index({ root: "docs/example" })` |
 | **Doc**     | `doc_search`       | Full-text search indexed docs; returns path, snippet; use workspace_read(path) for full content. | `doc_search({ query: "swap", limit: 5 })` |
@@ -77,6 +78,7 @@
 | **Solana**  | `solana_agent_token_send` | **Native:** send **SABTC / SAETH / SAUSD** by symbol (born with canonical mints). Optional Settings overrides. Rejects if estimated network fee &gt; 0.001 SOL. **Tier 4.** | `solana_agent_token_send({ token_symbol: "SAUSD", to: "…", amount_ui: 100 })` |
 | **Solana**  | `treasury_pool_info` | **Read-only:** Whirlpool snapshot (Orca API → RPC fallback). **`pair`** `SABTC_SAUSD` / `SAETH_SAUSD` or **`pool_address`**. Optional **`orca_proxy_base_url`**. Not a trade quote. | `treasury_pool_info({ pair: "SABTC_SAUSD" })` |
 | **Solana**  | `treasury_pool_swap` | **Native:** swap **SABTC↔SAUSD** or **SAETH↔SAUSD** on Orca Whirlpool (SDK only). **`dry_run:true`** simulates. Live needs Swaps + execution enabled. **Tier 4.** | `treasury_pool_swap({ input_token_symbol: "SAUSD", output_token_symbol: "SABTC", amount: "1000000", dry_run: true })` |
+| **Solana**  | **`peg_monitor_tick`** | One **peg-monitor** tick: HL **spot** (`@142`/`@151`) vs Orca implied USD; optional **`dry_run`** **`treasury_pool_swap`** when \|bps\| &gt; threshold; writes **`memory/peg-state.json`**, **`memory/heartbeat-state.json`**, DB **`peg_monitor_last_*`**. **`force_full`** optional. **Never** live-swaps. **Tier 4.** | `peg_monitor_tick({})` |
 | **Solana**  | `solana_tx_history`   | Recent tx signatures for the app wallet (optional limit).   | `solana_tx_history({ limit: 20 })` |
 | **Solana**  | `solana_tx_status`   | Transaction status by signature.                             | `solana_tx_status({ signature: "…" })` |
 | **Jupiter** | `jupiter_price`      | SOL or token USD price (and optional 24h change).             | `jupiter_price({})` or `jupiter_price({ ids: "SOL" })` |
@@ -92,10 +94,11 @@
 - **Input**: A free-form text query **or** a full URL.
 - **Process**:
   1. If input is a URL → fetch that URL directly.
-  2. Else **DuckDuckGo Instant Answer** for the raw query, then again for a **simplified** query (strips phrases like “find out more about”, “what is”, “tell me about”) — DDG often returns empty for full sentences.
-  3. If still no URL → **Wikipedia opensearch** (same two query strings; no API key; requires `User-Agent`).
-  4. If still no URL → extract a **domain** from the query and try `https://<domain>` / `https://www.<domain>`.
-  5. Fetch the chosen page (no JS execution), strip HTML → plain text (≈ 2000 chars excerpt).
+  2. Else if **`SERPAPI_API_KEY`** is set → **SerpApi Google** (`organic_results`), original query then **simplified** query; fetch the first few usable result URLs (longer page timeout). Falls back below if SerpApi fails or returns no links.
+  3. Else **DuckDuckGo Instant Answer** for the raw query, then again for a **simplified** query (strips phrases like “find out more about”, “what is”, “tell me about”) — DDG often returns empty for full sentences.
+  4. If still no URL → **Wikipedia opensearch** (same two query strings; no API key; requires `User-Agent`).
+  5. If still no URL → extract a **domain** from the query and try `https://<domain>` / `https://www.<domain>`.
+  6. Fetch the chosen page (no JS execution), strip HTML → plain text (≈ 2000 chars excerpt).
 - **Output**: `{ title, url, snippet, excerpt, timestamp }`.
 - **Test**: `npm run test:browse` (network required).
 
@@ -195,9 +198,13 @@ Run a shell command with the **workspace** (or a subdirectory) as the current di
 
 - **Input**: `{ expression, task }`.
   - `expression` – Cron expression (5 fields: min hour day month weekday), e.g. `*/5 * * * *` = every 5 minutes. Hourly example: `0 * * * *` (at minute 0 of each hour).
-  - `task` – One of: `log`, `heartbeat`, `check_btc` (predefined tasks only; no arbitrary shell/JS).
+  - `task` – One of: **`log`**, **`heartbeat`**, **`check_btc`**, **`peg_monitor`** (predefined only; no arbitrary shell/JS). Scheduling **`peg_monitor`** requires **security tier 4** (same as treasury wallet tools).
 - **Output**: `{ ok, message, schedule }` – e.g. `schedule: "*/5 * * * *:heartbeat"` or error if invalid expression/unknown task.
-- **Important**: Cron task **`heartbeat`** runs the same **server health** payload as the **`heartbeat`** tool (timestamp, memory, pid). It does **not** invoke the chat model and does **not** read **`HEARTBEAT.md`**. For periodic **agent** peg/checklist work, use **`HEARTBEAT_INTERVAL_SECONDS`** (Chat view) or ask the user to trigger a heartbeat message.
+- **Task notes**:
+  - **`heartbeat`** – Same **server health** payload as the **`heartbeat`** tool (timestamp, memory, pid). Does **not** call the LLM or read **`HEARTBEAT.md`**.
+  - **`peg_monitor`** – Runs **`runPegMonitorTick`** (HL vs Orca peg check, **dry-run** swaps only, balance/skew/cleanup). Persists last run to **`trading_dashboard_meta`** (`peg_monitor_last_*`). Configure sizing/thresholds with **`PEG_MONITOR_*`** in **`.env`** (see **`tools/peg-monitor.js`**).
+  - **`check_btc`** – CoinGecko price vs **`BTC_ALERT_BELOW`**; can write **`data/memory/alerts.md`**.
+- For periodic **agent** checklist work in chat, use **`HEARTBEAT_INTERVAL_SECONDS`** (Chat view) + **`HEARTBEAT.md`**, or call **`peg_monitor_tick`** / schedule **`peg_monitor`** for automated peg ticks.
 - **Note**: List/stop of scheduled jobs is available in code (`cronjob.listCronJobs`, `cronjob.stopCronJob`) but not exposed as LLM tools in this version.
 
 ---
@@ -291,6 +298,16 @@ All Solana wallet tools use the **app wallet** (keypair from encrypted config / 
 - **Output (dry_run)**: `{ ok: true, dry_run: true, simulation_err, simulation_logs?, … }`.
 - **Refs**: **`docs/TREASURY_POOL_TRADING.md`**, **`npm run verify:treasury-trade-path`**.
 
+### `peg_monitor_tick`
+
+- **What it is:** One **peg-monitor** cycle: **Hyperliquid spot** mids (UBTC/UETH keys **`@142`** / **`@151`**) vs **Orca** **`treasury_pool_info`** implied USD for **SABTC_SAUSD** and **SAETH_SAUSD**; deviation in **basis points**. When \|bps\| exceeds **`PEG_MONITOR_THRESHOLD_BPS`** (default 100), runs **`treasury_pool_swap`** with **`dry_run: true` only** (never broadcasts). Alternates **full** vs **quick** ticks (see **`memory/heartbeat-state.json`**). Optional **`force_full: true`**.
+- **Also writes:** **`memory/peg-state.json`**, daily **`memory/YYYY-MM-DD.md`** lines on alerts, SQLite **`trading_dashboard_meta`** keys **`peg_monitor_last_*`** (for **Trading** page).
+- **Input**: `{ force_full? }` (optional boolean).
+- **Policy**: **Tier 4.** Blocked while **`swapLock`** is active. Same wallet/env as **`treasury_pool_swap`**.
+- **Env**: **`PEG_MONITOR_THRESHOLD_BPS`**, **`PEG_MONITOR_SBTC_UI`**, **`PEG_MONITOR_SAETH_UI`**, **`PEG_MONITOR_MIN_SOL`**, **`PEG_MONITOR_SKEW_PCT`**, optional **`PEG_MONITOR_VERBOSE`** (CLI). Set in **`.env`**; restart server to pick up changes.
+- **Other triggers:** **`POST /api/trading/peg-monitor/run`**, **`npm run peg-monitor`**, cron **`peg_monitor`**.
+- **Output**: `{ ok, mode, heartbeat_ok, summary, lines?, peg_state?, reply }` (shape varies for quick vs full).
+
 ### `solana_tx_history`
 
 - **Input**: `{ limit? }` – optional, default 20, max 50.
@@ -341,6 +358,22 @@ Use for **price checks** and **swap quotes** (no execution).
 
 ---
 
+## Trading dashboard (HTTP, same-origin)
+
+Used by sidebar **Trading** (not LLM tools). See **`docs/PLAN_TRADING_PAGE.md`**.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/trading/snapshot` | Capture HL spot + Orca pool rows → SQLite history. |
+| `GET` | `/api/trading/latest` | Latest HL + pool snapshot + meta. |
+| `GET` | `/api/trading/hl` | HL history (`?limit=`). |
+| `GET` | `/api/trading/pools` | Pool history (`?pair=SABTC_SAUSD` \| `SAETH_SAUSD`). |
+| `GET` | `/api/trading/peg-monitor` | Peg monitor **status**, resolved **`PEG_MONITOR_*`** env, **last run** from DB. |
+| `POST` | `/api/trading/peg-monitor/run` | Run one **`peg_monitor_tick`** (dry-run only); returns result + refreshed **last**. |
+
+Wallet strip uses **`GET /api/solana-wallet/balance`** (same as Wallet page).
+
+---
 
 ## Skills (workspace, MCP-like)
 

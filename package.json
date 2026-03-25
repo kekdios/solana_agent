@@ -51,6 +51,7 @@
     "run:agent-solana-balance": "node scripts/run-agent-solana-balance.mjs",
     "run:agent-treasury-swap": "node scripts/run-agent-treasury-swap.mjs",
     "migrate:check": "node scripts/migration-stage-check.mjs",
-    "test:browse": "node scripts/test-browse.mjs"
+    "test:browse": "node scripts/test-browse.mjs",
+    "peg-monitor": "node scripts/run-peg-monitor.mjs"
   }
 }

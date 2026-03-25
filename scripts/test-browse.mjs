@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Smoke-test browse tool: DDG + Wikipedia fallbacks (needs network).
+ * Smoke-test browse tool: SerpApi (if SERPAPI_API_KEY) else DDG + Wikipedia (needs network).
  * Usage: node scripts/test-browse.mjs
  */
 import { browse, simplifyBrowseQuery } from "../tools/browser.js";

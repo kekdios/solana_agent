@@ -26,6 +26,9 @@ import * as solana from "./tools/solana.js";
 import * as treasuryPool from "./tools/treasury-pool-swap.js";
 import { treasuryPoolInfo } from "./tools/treasury-pool-info.js";
 import { hyperliquidPerpMids } from "./tools/hyperliquid-price.js";
+import { captureTradingSnapshot, HL_SPOT_BTC_ETH_KEYS } from "./tools/trading-snapshot.js";
+import { DEFAULT_SA_AGENT_TOKEN_MINTS, loadSaAgentTokenMints } from "./tools/sa-agent-mints.js";
+import { runPegMonitorTick, getPegMonitorEnvResolved } from "./tools/peg-monitor.js";
 import * as jupiter from "./tools/jupiter.js";
 import * as execModule from "./tools/exec.js";
 
@@ -94,9 +97,20 @@ const PARAM_SCHEMAS = {
     type: "object",
     properties: {
       expression: { type: "string", description: "Cron expression, e.g. '0 * * * *' for hourly, '*/5 * * * *' for every 5 min" },
-      task: { type: "string", description: "Task name: 'log', 'heartbeat', or 'check_btc' (hourly Bitcoin price; alert when below 65k)" },
+      task: {
+        type: "string",
+        description:
+          "Task name: 'log', 'heartbeat', 'check_btc', or 'peg_monitor' (HL vs Orca peg dry-runs + balance/cleanup; Tier 4 server only)",
+      },
     },
     required: ["expression", "task"],
+  },
+  peg_monitor_tick: {
+    type: "object",
+    properties: {
+      force_full: { type: "boolean", description: "Run full peg check even when the scheduler would use a quick tick" },
+    },
+    required: [],
   },
   get_btc_price: { type: "object", properties: {} },
   workspace_read: {
@@ -438,6 +452,30 @@ const MAX_TOOL_TURNS = 5;
 // Swap lock: when true, block other high-risk tools while a swap is executing.
 let swapLock = { active: false, intent_id: null, started_at: 0 };
 
+/** True while POST /api/trading/peg-monitor/run is in flight (Trading UI + API). */
+let pegMonitorRunning = false;
+
+function getPegMonitorLastForApi() {
+  const pick = (k) => db.getTradingMeta(k)?.value ?? null;
+  let state = null;
+  const raw = pick("peg_monitor_last_state_json");
+  if (raw) {
+    try {
+      state = JSON.parse(raw);
+    } catch {
+      state = null;
+    }
+  }
+  return {
+    last_run_at: pick("peg_monitor_last_run_at"),
+    summary: pick("peg_monitor_last_summary"),
+    heartbeat_ok: pick("peg_monitor_last_heartbeat_ok") === "1",
+    mode: pick("peg_monitor_last_mode"),
+    state,
+    error: pick("peg_monitor_last_error") || null,
+  };
+}
+
 function toolAllowedByTier(tier, name, args) {
   const t = clampSecurityTier(tier);
   if (t >= 4) return true;
@@ -449,7 +487,13 @@ function toolAllowedByTier(tier, name, args) {
       const m = String(args?.method || "GET").toUpperCase();
       if (m === "POST") return false;
     }
-    if (name === "solana_transfer" || name === "solana_transfer_spl" || name === "solana_agent_token_send" || name === "treasury_pool_swap")
+    if (
+      name === "solana_transfer" ||
+      name === "solana_transfer_spl" ||
+      name === "solana_agent_token_send" ||
+      name === "treasury_pool_swap" ||
+      name === "peg_monitor_tick"
+    )
       return false;
   }
 
@@ -499,7 +543,8 @@ function toolAllowedByTier(tier, name, args) {
     name === "jupiter_swap_execute" ||
     name === "jupiter_swap_cancel" ||
     name === "jupiter_swap_confirm" ||
-    name === "treasury_pool_swap"
+    name === "treasury_pool_swap" ||
+    name === "peg_monitor_tick"
   )
     return false;
 
@@ -548,8 +593,16 @@ async function runTool(name, args, env) {
         return await vision.analyzeImage(args.file_id ?? "", args.prompt ?? "", env);
       case "heartbeat":
         return await heartbeat.heartbeat();
-      case "cronjob":
+      case "cronjob": {
+        const task = String(args.task ?? "").trim().toLowerCase();
+        if (task === "peg_monitor" && clampSecurityTier(securityTier) < 4) {
+          return {
+            ok: false,
+            error: "Scheduling task 'peg_monitor' requires security tier 4 (uses treasury wallet / Orca dry-runs).",
+          };
+        }
         return await cronjob.scheduleCron(args.expression ?? "", args.task ?? "", env);
+      }
       case "get_btc_price":
         return await price.getBtcPriceUsd();
       case "workspace_read":
@@ -656,6 +709,11 @@ async function runTool(name, args, env) {
         return getSwapSettings();
       case "clear_expired_swap_intents":
         return db.clearExpiredSwapIntents();
+      case "peg_monitor_tick":
+        return await runPegMonitorTick({
+          forceFull: args.force_full === true,
+          env: { saAgentTokenMap: loadSaAgentTokenMints(), agentTokenBuiltInMints: DEFAULT_SA_AGENT_TOKEN_MINTS },
+        });
       case "nostr_action":
         return await nostrActionDirect(args, env);
       // Redirect legacy EVM-style names to Solana (app is Solana-only)
@@ -1463,66 +1521,6 @@ function loadConfigKey(key, envFallback) {
   return envFallback ?? null;
 }
 
-/** Keys like SABTC, SAETH (SA + alnum) mapping to mint base58. */
-const SA_AGENT_TOKEN_KEY_RE = /^SA[A-Z0-9]{2,20}$/;
-
-/** Built-in defaults so Wallet + tools work without SA_AGENT_TOKENS; config/env overrides these. */
-const DEFAULT_SA_AGENT_TOKEN_MINTS = Object.freeze({
-  SABTC: "2kR1UKhrXq6Hef6EukLyzdD5ahcezRqwURKdtCJx2Ucy",
-  SAETH: "AhyZRrDrN3apDzZqdRHtpxWmnqYDdL8VnJ66ip1KbiDS",
-  SAUSD: "CK9PodBifHymLBGeZujExFnpoLCsYxAw7t8c8LsDKLxG",
-});
-
-function looksLikeSolanaMintAddress(s) {
-  const t = String(s).trim();
-  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(t);
-}
-
-/**
- * Mint map for solana_agent_token_send: built-in SABTC/SAETH/SAUSD defaults, then SA_AGENT_TOKENS block,
- * plus config/env keys matching SABTC, SAETH, etc. Overrides replace defaults per symbol.
- */
-function loadSaAgentTokenMints() {
-  const out = Object.create(null);
-
-  const block = loadConfigKey("SA_AGENT_TOKENS", process.env.SA_AGENT_TOKENS);
-  if (block && String(block).trim()) {
-    for (const line of String(block).split(/[\r\n]+/)) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eq = trimmed.indexOf("=");
-      const col = trimmed.indexOf(":");
-      let sep = -1;
-      if (eq >= 0 && (col < 0 || eq < col)) sep = eq;
-      else if (col >= 0) sep = col;
-      if (sep < 0) continue;
-      const sym = trimmed.slice(0, sep).trim().toUpperCase();
-      const mint = trimmed.slice(sep + 1).trim();
-      if (sym && looksLikeSolanaMintAddress(mint)) out[sym] = mint;
-    }
-  }
-
-  try {
-    for (const row of db.listConfigKeys()) {
-      const k = String(row.key || "");
-      if (!SA_AGENT_TOKEN_KEY_RE.test(k) || k === "SA_AGENT_TOKENS") continue;
-      const v = loadConfigKey(k);
-      if (v && looksLikeSolanaMintAddress(v)) out[k.toUpperCase()] = v.trim();
-    }
-  } catch (_) {}
-
-  for (const [k, v] of Object.entries(process.env)) {
-    if (!SA_AGENT_TOKEN_KEY_RE.test(k) || k === "SA_AGENT_TOKENS") continue;
-    if (v && looksLikeSolanaMintAddress(v)) out[k.toUpperCase()] = v.trim();
-  }
-
-  for (const [sym, mint] of Object.entries(DEFAULT_SA_AGENT_TOKEN_MINTS)) {
-    if (!out[sym]) out[sym] = mint;
-  }
-
-  return out;
-}
-
 const AGENT_WALLET_PANEL_SYMBOLS = ["SABTC", "SAETH", "SAUSD"];
 /** Decimals when the wallet has no ATA yet (must match on-chain mints for default agent tokens). */
 const AGENT_PANEL_DEFAULT_DECIMALS = Object.freeze({ SABTC: 6, SAETH: 6, SAUSD: 6 });
@@ -1884,6 +1882,20 @@ const server = createServer(async (req, res) => {
       if (Array.isArray(body.models)) return body.models;
       return [];
     }
+    /** Dedupe by `id`; keep first occurrence (canonical / subscription list before paid extras). */
+    function mergeModelLists(a, b) {
+      const seen = new Set();
+      const out = [];
+      for (const arr of [a, b]) {
+        for (const m of arr) {
+          if (m && typeof m.id === "string" && m.id.length > 0 && !seen.has(m.id)) {
+            seen.add(m.id);
+            out.push(m);
+          }
+        }
+      }
+      return out;
+    }
     try {
       // Match check-balance: x-api-key only (Bearer + x-api-key broke some keys / empty filtered lists).
       let r = await fetch(upstream, {
@@ -1910,6 +1922,19 @@ const server = createServer(async (req, res) => {
           list = modelArrayFromBody(p2);
         }
       }
+      // NanoGPT: with a key, canonical /api/v1/models may list only subscription-included models unless
+      // the user enables "Also show paid models" in NanoGPT account settings. Merge /api/paid/v1/models
+      // so the in-app picker still surfaces paid / extra models (same key). See NanoGPT models docs.
+      let paidList = [];
+      try {
+        const paidUrl = `https://nano-gpt.com/api/paid/v1/models${search}`;
+        const pr = await fetch(paidUrl, { headers: { "x-api-key": key.trim() } });
+        const pp = await pr.json().catch(() => ({}));
+        if (pr.ok) paidList = modelArrayFromBody(pp);
+      } catch (_) {
+        /* ignore paid merge failures */
+      }
+      list = mergeModelLists(list, paidList);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
@@ -3424,6 +3449,176 @@ const server = createServer(async (req, res) => {
     } catch (e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: String(e.message), alerts: [] }));
+    }
+    return;
+  }
+
+  /** Trading dashboard: HL spot UBTC/UETH + Orca SABTC/SAETH pool snapshots → SQLite. */
+  if (path === "/api/trading/snapshot" && req.method === "POST") {
+    try {
+      const snap = await captureTradingSnapshot({});
+      const hl = snap.hyperliquid;
+      if (hl?.ok) {
+        const mids = hl.mids_usd || {};
+        db.insertTradingHlSpotSnapshot({
+          btc_price: mids[HL_SPOT_BTC_ETH_KEYS.btc],
+          eth_price: mids[HL_SPOT_BTC_ETH_KEYS.eth],
+          btc_hl_key: HL_SPOT_BTC_ETH_KEYS.btc,
+          eth_hl_key: HL_SPOT_BTC_ETH_KEYS.eth,
+          btc_label: HL_SPOT_BTC_ETH_KEYS.btcLabel,
+          eth_label: HL_SPOT_BTC_ETH_KEYS.ethLabel,
+          raw_json: JSON.stringify({
+            resolved: hl.resolved,
+            mids_raw: hl.mids_raw,
+            market: hl.market,
+          }),
+        });
+      }
+      for (const pair of ["SABTC_SAUSD", "SAETH_SAUSD"]) {
+        const p = snap.pools?.[pair];
+        if (p?.ok && p.data) {
+          db.insertTradingPoolSnapshot({
+            pair,
+            pool_address: p.pool_address || null,
+            snapshot_json: JSON.stringify({
+              ok: true,
+              pool_address: p.pool_address,
+              pool_data_source: p.pool_data_source,
+              data: p.data,
+            }),
+          });
+        }
+      }
+      const errMsg =
+        !hl?.ok
+          ? hl?.error || "Hyperliquid failed"
+          : !snap.pools?.SABTC_SAUSD?.ok
+            ? snap.pools?.SABTC_SAUSD?.error || "SABTC pool failed"
+            : !snap.pools?.SAETH_SAUSD?.ok
+              ? snap.pools?.SAETH_SAUSD?.error || "SAETH pool failed"
+              : null;
+      db.setTradingMeta("last_snapshot_at", new Date().toISOString());
+      db.setTradingMeta("last_snapshot_ok", errMsg ? "0" : "1");
+      if (errMsg) db.setTradingMeta("last_snapshot_error", errMsg);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: !errMsg,
+          error: errMsg || undefined,
+          capture: snap,
+          latest: db.getTradingLatestSnapshots(),
+        })
+      );
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e?.message || String(e) }));
+    }
+    return;
+  }
+
+  if (path === "/api/trading/latest" && req.method === "GET") {
+    try {
+      const latest = db.getTradingLatestSnapshots();
+      const meta = {
+        last_snapshot_at: db.prepare(`SELECT value FROM trading_dashboard_meta WHERE key = ?`).get("last_snapshot_at")?.value,
+        last_snapshot_ok: db.prepare(`SELECT value FROM trading_dashboard_meta WHERE key = ?`).get("last_snapshot_ok")?.value,
+        last_snapshot_error: db.prepare(`SELECT value FROM trading_dashboard_meta WHERE key = ?`).get("last_snapshot_error")?.value,
+      };
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, ...latest, meta, hl_spot_keys: HL_SPOT_BTC_ETH_KEYS }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e?.message || String(e) }));
+    }
+    return;
+  }
+
+  if (path === "/api/trading/hl" && req.method === "GET") {
+    try {
+      const limit = url.searchParams.get("limit");
+      const rows = db.getTradingHlHistory({ limit: limit != null ? Number(limit) : 200 });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, rows }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e?.message || String(e), rows: [] }));
+    }
+    return;
+  }
+
+  if (path === "/api/trading/pools" && req.method === "GET") {
+    try {
+      const pair = url.searchParams.get("pair") || "SABTC_SAUSD";
+      const limit = url.searchParams.get("limit");
+      const rows = db.getTradingPoolHistory(pair, { limit: limit != null ? Number(limit) : 200 });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, pair, rows }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e?.message || String(e), rows: [] }));
+    }
+    return;
+  }
+
+  /** Peg monitor status, resolved PEG_MONITOR_* env, last run persisted in trading_dashboard_meta. */
+  if (path === "/api/trading/peg-monitor" && req.method === "GET") {
+    try {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: true,
+          running: pegMonitorRunning,
+          schedule: {
+            title: "When it runs",
+            bullets: [
+              "Not on a built-in timer — only when something triggers a tick.",
+              "Chat: peg_monitor_tick tool (Tier 4).",
+              "Cron: cronjob with task peg_monitor (e.g. 0 * * * * hourly; Tier 4 required to schedule).",
+              "CLI: npm run peg-monitor from the repo.",
+              'Trading page: "Run peg check" below (POST this server).',
+            ],
+          },
+          env: getPegMonitorEnvResolved(),
+          last: getPegMonitorLastForApi(),
+        })
+      );
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e?.message || String(e) }));
+    }
+    return;
+  }
+
+  /** Run one peg monitor tick (dry-run swaps only); same logic as peg_monitor_tick. */
+  if (path === "/api/trading/peg-monitor/run" && req.method === "POST") {
+    try {
+      if (pegMonitorRunning) {
+        res.writeHead(409, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Peg monitor run already in progress." }));
+        return;
+      }
+      pegMonitorRunning = true;
+      const out = await runPegMonitorTick({
+        forceFull: false,
+        env: { saAgentTokenMap: loadSaAgentTokenMints(), agentTokenBuiltInMints: DEFAULT_SA_AGENT_TOKEN_MINTS },
+      });
+      pegMonitorRunning = false;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: true,
+          result: out,
+          env: getPegMonitorEnvResolved(),
+          last: getPegMonitorLastForApi(),
+        })
+      );
+    } catch (e) {
+      pegMonitorRunning = false;
+      try {
+        db.setTradingMeta("peg_monitor_last_error", e?.message || String(e));
+      } catch (_) {}
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e?.message || String(e), last: getPegMonitorLastForApi() }));
     }
     return;
   }

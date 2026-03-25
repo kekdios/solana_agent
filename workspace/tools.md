@@ -1,12 +1,12 @@
 # Available Tools (Solana Agent)
 
-**You can and should use any of the strategies and tools when they fit the user's request.** The full reference is **TOOLS.md** in the project root (table of contents, strategies-at-a-glance, and detailed specs). For Solana-specific flows, read **skills/solana/SKILLS.md**.
+**You can and should use any of the strategies and tools when they fit the user's request.** The full reference is **TOOLS.md** in the project root (table of contents, strategies-at-a-glance, detailed specs, Trading HTTP APIs). For Solana-specific flows, read **skills/solana/SKILLS.md**.
 
 **Wallet:** For "what are your wallet balances", "balance", or "address" use **solana_balance** and **solana_address** only. There are no account_balance or account_address tools in this app.
 
-**Strategies:** Wallet · Swaps/prices (Jupiter, CoinGecko SOL, **Hyperliquid** perp/spot mids) · Docs · Workspace · **Sandbox (exec)** · Memory · Web/API (browse, fetch_url).
+**Strategies:** Wallet · Swaps/prices (Jupiter, CoinGecko SOL, **Hyperliquid** perp/spot mids) · **Treasury Orca** (**treasury_pool_info**, **treasury_pool_swap**) · **Peg monitor** (**peg_monitor_tick**, cron **peg_monitor**, Trading UI) · Docs · Workspace · **Sandbox (exec)** · Memory · Web/API (**browse**, **fetch_url**).
 
-**`browse`:** Use a **short search phrase** or a full **`https://` URL**. Very long sentences often yield no results—shorten the query or paste the target URL.
+**`browse`:** Pass a **short search phrase** or a full **`https://` URL**. With **`SERPAPI_API_KEY`** in **`.env`**, search uses **SerpApi Google** organic results (better recall); otherwise DuckDuckGo Instant Answer + Wikipedia + domain fallback. Long sentences often miss — shorten the query or paste a URL.
 
 Do not say you cannot do something if a tool exists for it. Call the right tool and reason from the result.
 
@@ -32,13 +32,16 @@ Legacy website posting paths are removed; Nostr is direct relays via **`nostr_ac
 
 | Strategy / category | Tools |
 | ------------------- | ----- |
-| **Wallet** | solana_address, solana_balance, solana_transfer, solana_network, solana_token_balance, solana_transfer_spl, solana_tx_history, solana_tx_status |
+| **Wallet** | solana_address, solana_balance, solana_transfer, solana_network, solana_token_balance, solana_transfer_spl, **solana_agent_token_send** (SABTC/SAETH/SAUSD), solana_tx_history, solana_tx_status |
 | **Jupiter / prices** | jupiter_price, jupiter_quote, get_sol_price_usd, **hyperliquid_price** (optional `market`: `"perp"` \| **`"spot"`**) |
-| **Treasury pool (SABTC/SAETH/SAUSD)** | treasury_pool_info, treasury_pool_swap (Orca; Tier 4; see **docs/TREASURY_POOL_TRADING.md**) |
+| **Treasury pool (SABTC/SAETH/SAUSD)** | treasury_pool_info, treasury_pool_swap (Orca; Tier 4; **`dry_run`** for sim; see **docs/TREASURY_POOL_TRADING.md**) |
+| **Peg monitor (HL vs pool, dry-run only)** | **peg_monitor_tick** (Tier 4); or schedule **cronjob** `{ task: "peg_monitor" }` (Tier 4); Trading page **Run peg check**; CLI **`npm run peg-monitor`**. Env **`PEG_MONITOR_*`** in **`.env`**. |
 | **Docs** | doc_crawl, doc_index, doc_search, read_docs_folder |
 | **Workspace** | workspace_read, workspace_write, workspace_delete, workspace_list, workspace_tree — for **any** file/directory listing, call **workspace_tree** or **workspace_list** first; never invent file trees |
 | **Sandbox** | exec (run shell commands in workspace; create programs with workspace_write, then exec) |
 | **Memory** | conversation_search |
-| **Core / web** | browse, fetch_url, file_write, file_read, file_list, heartbeat, cronjob, get_btc_price, generate_image, analyze_image |
+| **Core / web** | **browse** (SerpApi if key set), fetch_url, file_write, file_read, file_list, heartbeat, **cronjob** (includes **peg_monitor**), get_btc_price, generate_image, analyze_image |
 
 Slash commands: /save, /history, /help. New chat via sidebar.
+
+**Trading UI (sidebar Trading):** Snapshot refresh (**HL + Orca** history), **Peg monitor** panel (effective **`PEG_MONITOR_*`**, last run, **Run peg check**). Not a substitute for **`peg_monitor_tick`** in chat — same backend logic.

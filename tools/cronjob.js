@@ -6,6 +6,7 @@
 import cron from "node-cron";
 import * as heartbeatModule from "./heartbeat.js";
 import * as priceModule from "./price.js";
+import { runPegMonitorTick } from "./peg-monitor.js";
 
 const DEFAULT_TASKS = {
   log: () => {
@@ -27,6 +28,16 @@ const DEFAULT_TASKS = {
       console.warn("[cron check_btc]", result.error);
     }
   },
+  peg_monitor: async () => {
+    try {
+      const out = await runPegMonitorTick({});
+      const tag = out.heartbeat_ok ? "ok" : "ATTN";
+      console.log(`[cron peg_monitor] ${tag} mode=${out.mode} ${out.summary}`);
+      if (Array.isArray(out.lines)) console.log(out.lines.join("\n"));
+    } catch (e) {
+      console.error("[cron peg_monitor]", e?.message || e);
+    }
+  },
 };
 
 let scheduled = new Map(); // expression -> { task, taskName, ref }
@@ -45,7 +56,7 @@ function isValidCron(expression) {
  * Schedules a recurring job. Task must be a predefined name (e.g. "log", "heartbeat").
  *
  * @param {string} expression – cron expression, 5 fields (e.g. every 5 min)
- * @param {string} taskName – one of: "log", "heartbeat", "check_btc"
+ * @param {string} taskName – one of: "log", "heartbeat", "check_btc", "peg_monitor"
  * @param {Object} [context]
  * @returns {Promise<Object>} { ok, message, schedule }
  */

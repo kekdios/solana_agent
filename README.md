@@ -60,7 +60,7 @@ By default, when you run **`node server.js`** from the project root, the DB is a
 **Testing:** From the project root:
 - `node scripts/test-exec-sandbox.js` — exec/sandbox test suite (temp workspace, echo, cwd, workdir, timeout).
 - `npm run test:server-start` — spawns `server.js` on a test port and checks `/api/help`.
-- `npm run test:browse` — smoke-test **`browse`** (DDG + Wikipedia fallback; needs network).
+- `npm run test:browse` — smoke-test **`browse`** (SerpApi if **`SERPAPI_API_KEY`**, else DDG + Wikipedia; needs network).
 - `npm run test:in-process-server` — starts the server in-process and checks `/api/help` (uses a temp data dir, then removes it).
 - `npm run test:nanogpt-models` — integration check for NanoGPT **`/api/v1/models`** (public + keyed; needs network).
 - `npm run test:hyperliquid-btc-eth` — Hyperliquid **perp** mids for BTC and ETH (needs network).
@@ -111,22 +111,25 @@ In chat: ask e.g. "swap $5 SOL to USDC". The agent will prepare an intent; use t
 
 **Wallet page:** Shows address + SOL balance, and a paginated token table (10 rows/page) with logos for common tokens (e.g. SOL/USDC) pulled from `https://logos.tradeloop.app/`.
 
+**Trading page (see `docs/PLAN_TRADING_PAGE.md`):** Sidebar **Trading** — **Orca** SABTC/SAUSD & SAETH/SAUSD snapshots, **Hyperliquid spot** UBTC/UETH mids (`@142` / `@151`), history in **`data/solagent.db`** (`POST /api/trading/snapshot`, `GET /api/trading/latest`, …). **Peg monitor** panel: effective **`PEG_MONITOR_*`** from **`.env`**, last run summary, **Run peg check** (`POST /api/trading/peg-monitor/run`, dry-run only). Chat tool **`peg_monitor_tick`** and cron task **`peg_monitor`** use the same logic. Shows agent **wallet** + **SABTC / SAETH / SAUSD**; private key stays server-side only.
+
 ## Tools (orchestrator)
 
 The chat uses **OpenAI-compatible tool/function calling** (NanoGPT, Inception, or Venice). **V3:** tools are attached on **every** message. The model can call:
 
-- **browse** – Web search (DuckDuckGo + Wikipedia fallback) and fetch first result page; returns title, url, snippet, excerpt. Prefer a **short keyword** or a full **`https://` URL**; long sentences often return no hit.
+- **browse** – Web search: **SerpApi Google** when **`SERPAPI_API_KEY`** is set; else DuckDuckGo + Wikipedia fallback; or fetch a full **`https://` URL**. Returns title, url, snippet, excerpt. Prefer a **short keyword** or paste a URL; long sentences often return no hit.
 - **hyperliquid_price** – Hyperliquid **perp** or **spot** mid USD via public **`allMids`** (`market`: `"perp"` default or **`"spot"`**; spot: e.g. `HYPE`, `@107`, `PURR/USDC`). Reference only—not an executable quote. See **TOOLS.md**.
 - **get_sol_price_usd** – SOL/USD from CoinGecko (same idea as Wallet pricing for “$X in SOL”).
 - **jupiter_quote** / **jupiter_swap_*** – Swap quote and gated execution flow (Tier 4 + Settings → Swaps). See **TOOLS.md**.
 - **treasury_pool_info** / **treasury_pool_swap** – Read Orca Whirlpool for **SABTC/SAETH/SAUSD** pairs; native swap with **`dry_run`**. See **`docs/TREASURY_POOL_TRADING.md`**.
+- **peg_monitor_tick** – One peg-monitor cycle (HL spot vs pool implied price; **dry-run** **`treasury_pool_swap`** only when over threshold). **Tier 4.** Env **`PEG_MONITOR_*`** in **`.env`**. Same engine as Trading **Run peg check** and cron **`peg_monitor`**.
 - **file_write** – Save a file (filename + content); returns file id.
 - **file_read** – Read a file by id.
 - **file_list** – List saved files.
 - **generate_image** – Generate an image from a text prompt. Set `IMAGE_API_URL` and `IMAGE_API_KEY` in Settings (or .env for local testing) to enable (e.g. OpenAI-compatible image endpoint).
 - **analyze_image** – Describe or OCR an uploaded image. Set `VISION_API_URL` and `VISION_API_KEY` in Settings (or .env for local testing). Optional: `VISION_MODEL` (default `gpt-4o-mini`).
 - **heartbeat** – Returns a health-check payload (timestamp, status, memory, pid). Optional: set `HEARTBEAT_INTERVAL_SECONDS` in Settings → Environment. When set, the server logs a lightweight heap heartbeat on that interval; the Chat UI can inject the default heartbeat user prompt on the same interval.
-- **cronjob** – Schedule a recurring task with a cron expression. Tasks: `log`, **`heartbeat`** (server health payload only—**not** LLM / **not** `HEARTBEAT.md`), **`check_btc`** (Bitcoin price check; writes an alert to `data/memory/alerts.md` when price drops below threshold). Example: `0 * * * *` = every hour; `*/5 * * * *` = every 5 minutes. Set `BTC_ALERT_BELOW=65000` in .env (testing only) to change the alert threshold (default 65k).
+- **cronjob** – Schedule a recurring task with a cron expression. Tasks: `log`, **`heartbeat`** (server health payload only—**not** LLM / **not** `HEARTBEAT.md`), **`check_btc`** (Bitcoin price check; writes an alert to `data/memory/alerts.md` when price drops below threshold), **`peg_monitor`** (HL vs Orca peg tick, **dry-run** swaps only; **Tier 4** required to schedule). Example: `0 * * * *` = every hour; `*/5 * * * *` = every 5 minutes. Set `BTC_ALERT_BELOW=65000` in .env (testing only) to change the alert threshold (default 65k).
 - **get_btc_price** – Get current Bitcoin price in USD (CoinGecko). Use with **cronjob** task `check_btc` to “check every hour and alert if below $65k”; view alerts via `GET /api/alerts` or `data/memory/alerts.md`.
 - **conversation_search** – Search past conversations by text (long-term memory). Returns conversation_id, excerpt, date; use when the user asks what you discussed or to find past chats about a topic. See **TOOLS.md**.
 - **Wallet (Solana):** `solana_address`, `solana_balance`, `solana_transfer`, `solana_token_balance`, `solana_transfer_spl`, `solana_tx_history`, `solana_tx_status`, `solana_network`. Uses the app wallet (configured in Settings). See **TOOLS.md** for full list and details.

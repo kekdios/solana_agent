@@ -4,6 +4,7 @@ import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
 import QuickStartPage from "./components/QuickStartPage";
 import WalletPage from "./components/WalletPage";
+import TradingPage from "./components/TradingPage";
 import AllMessagesPage from "./components/AllMessagesPage";
 import NanoGptPage from "./components/NanoGptPage";
 import NostrPage from "./components/NostrPage";
@@ -106,6 +107,8 @@ function App() {
           <QuickStartPage />
         ) : view === "wallet" ? (
           <WalletPage onOpenSettings={() => setSettingsOpen(true)} />
+        ) : view === "trading" ? (
+          <TradingPage />
         ) : view === "nostr" ? (
           <NostrPage />
         ) : view === "allMessages" ? (
