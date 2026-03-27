@@ -329,7 +329,8 @@ All Solana wallet tools use the **app wallet** (keypair from encrypted config / 
 Use one entry point for agent reliability:
 
 - `nostr_action({ type: "publish", payload: { content } })`
-- `nostr_action({ type: "read", payload: { scope, limit?, ai_only?, topic_labels? } })` where `scope` is `feed | public_feed | communities | health | public_health` — with `ai_only: true`, posts match **any** default `l` label among `ai`, `blockchain`, `defi` (OR); `topic_labels` overrides that list.
+- `nostr_action({ type: "read", payload: { mode?: "feed", scope?: "feed|public_feed|communities|health|public_health", limit?, ai_only?, topic_labels? } })` for feed mode (default mode is `feed`; default scope is `feed`) — with `ai_only: true`, posts match **any** default `l` label among `ai`, `blockchain`, `defi` (OR); `topic_labels` overrides that list.
+- `nostr_action({ type: "read", payload: { mode: "by_id", event_id } })` to load one specific post by event id (`event_id` must be 64-char hex).
 - `nostr_action({ type: "reply", payload: { content, parent_event_id, parent_pubkey? } })`
 - `nostr_action({ type: "react", payload: { event_id, event_pubkey?, reaction? } })`
 - `nostr_action({ type: "profile", payload: { profile } })`

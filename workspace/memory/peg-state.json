@@ -1,23 +1,83 @@
 {
-  "updated_at": "2026-03-25T01:09:52.597Z",
+  "updated_at": "2026-03-26T15:13:56.701Z",
   "hl": {
     "btc_key": "@142",
     "eth_key": "@151",
-    "btc_usd": 70752.5,
-    "eth_usd": 2161.25
+    "btc_usd": 69093.5,
+    "eth_usd": 2064.55
   },
   "sbtc": {
-    "deviation_bps": -81.18194992258188,
+    "deviation_bps": 156.9782119606411,
     "pool_usd_per_base": 70178.11740881026,
-    "hl_usd": 70752.5,
-    "suggested_action": "none",
-    "dry_run": null
+    "hl_usd": 69093.5,
+    "suggested_action": "premium_SABTC_sell_for_SAUSD",
+    "dry_run": {
+      "ok": true,
+      "dry_run": true,
+      "input_token_symbol": "SABTC",
+      "output_token_symbol": "SAUSD",
+      "pool": "GSpVz4P5HKzVBccAFAdfWzXc1VYhGLKvzRNQZCw4KCoJ",
+      "input_mint": "2kR1UKhrXq6Hef6EukLyzdD5ahcezRqwURKdtCJx2Ucy",
+      "output_mint": "CK9PodBifHymLBGeZujExFnpoLCsYxAw7t8c8LsDKLxG",
+      "amount_in": "10000000",
+      "decimals_in": 8,
+      "estimated_amount_out": "6946947505",
+      "min_amount_out": "6878165846",
+      "slippage_bps": 100,
+      "simulation_err": null,
+      "simulation_logs": [
+        "Program whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc invoke [1]",
+        "Program log: Instruction: Swap",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]",
+        "Program log: Instruction: Transfer",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4645 of 172129 compute units",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]",
+        "Program log: Instruction: Transfer",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4645 of 165470 compute units",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
+        "Program data: 4cpJr5MroJblfIhABPnzhymECe6CzKegJP8krCb2w/OOu9U/UBIOiQFVCOvMyy+8fRoAAAAAAAAA7PZq5hi8EH0aAAAAAAAAAICWmAAAAAAAsQESngEAAAAAAAAAAAAAAAAAAAAAAAAA2FMBAAAAAADIMgAAAAAAAA==",
+        "Program whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc consumed 41774 of 200000 compute units"
+      ],
+      "estimated_network_fee_lamports": 5000,
+      "agent_report": "DRY_RUN treasury Whirlpool swap SABTC → SAUSD: quote ok; simulation ok."
+    }
   },
   "saeth": {
-    "deviation_bps": -56.67832967028996,
+    "deviation_bps": 409.04989465020634,
     "pool_usd_per_base": 2149.0003960000085,
-    "hl_usd": 2161.25,
-    "suggested_action": "none",
-    "dry_run": null
+    "hl_usd": 2064.55,
+    "suggested_action": "premium_SAETH_sell_for_SAUSD",
+    "dry_run": {
+      "ok": true,
+      "dry_run": true,
+      "input_token_symbol": "SAETH",
+      "output_token_symbol": "SAUSD",
+      "pool": "BzwjX8hwMbkVdhGu2w9qTtokr5ExqSDSw9bNMxdkExRS",
+      "input_mint": "AhyZRrDrN3apDzZqdRHtpxWmnqYDdL8VnJ66ip1KbiDS",
+      "output_mint": "CK9PodBifHymLBGeZujExFnpoLCsYxAw7t8c8LsDKLxG",
+      "amount_in": "1000000",
+      "decimals_in": 6,
+      "estimated_amount_out": "2127299789",
+      "min_amount_out": "2106237414",
+      "slippage_bps": 100,
+      "simulation_err": null,
+      "simulation_logs": [
+        "Program whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc invoke [1]",
+        "Program log: Instruction: Swap",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]",
+        "Program log: Instruction: Transfer",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4645 of 168156 compute units",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]",
+        "Program log: Instruction: Transfer",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4645 of 161497 compute units",
+        "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
+        "Program data: 4cpJr5MroJajbNy++ZTTSCTasDveTD+/JL4jm+hZpnhT6aIm1037PQGE4dEyP9B4Wy4AAAAAAAAARyHdOPISTFouAAAAAAAAAEBCDwAAAAAAzQTMfgAAAAAAAAAAAAAAAAAAAAAAAAAA/CEAAAAAAAAUBQAAAAAAAA==",
+        "Program whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc consumed 45747 of 200000 compute units"
+      ],
+      "estimated_network_fee_lamports": 5000,
+      "agent_report": "DRY_RUN treasury Whirlpool swap SAETH → SAUSD: quote ok; simulation ok."
+    }
   }
 }

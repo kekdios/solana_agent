@@ -180,6 +180,20 @@ export default function Sidebar() {
         </button>
         <button
           type="button"
+          onClick={() => setView("mining")}
+          className={`${navItemClass} ${view === "mining" ? "bg-emerald-500/20 text-emerald-400" : ""}`}
+          title="Mining — prototype multi-chain wallet demo (mnemonic in browser)"
+        >
+          <span className={iconClass} aria-hidden>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+              <circle cx="12" cy="13" r="3" />
+            </svg>
+          </span>
+          Mining
+        </button>
+        <button
+          type="button"
           onClick={() => setView("trend")}
           className={`${navItemClass} ${view === "trend" ? "bg-emerald-500/20 text-emerald-400" : ""}`}
           title="Trend dashboard (BTC/ETH/SOL VWAP, breadth, ratios)"

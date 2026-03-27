@@ -1,6 +1,8 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import wasm from "vite-plugin-wasm";
+import topLevelAwait from "vite-plugin-top-level-await";
 import path from "path";
 import { fileURLToPath } from "url";
 import { readFileSync } from "fs";
@@ -10,7 +12,7 @@ const pkg = JSON.parse(readFileSync(path.join(__dirname, "package.json"), "utf8"
 
 export default defineConfig({
   root: path.join(__dirname, "src/renderer"),
-  plugins: [react(), tailwindcss()],
+  plugins: [wasm(), topLevelAwait(), react(), tailwindcss()],
   resolve: {
     alias: {
       "@assets": path.join(__dirname, "assets"),

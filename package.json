@@ -5,22 +5,30 @@
   "main": "server.js",
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
+    "@noble/hashes": "1.8.0",
     "@orca-so/whirlpools-sdk": "^0.20.0",
     "@solana/codecs-data-structures": "2.0.0-rc.1",
     "@solana/codecs-strings": "2.0.0-rc.1",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
     "better-sqlite3": "^11.6.0",
+    "bip32": "^5.0.1",
+    "bip39": "^3.1.0",
+    "bitcoinjs-lib": "^7.0.1",
     "bs58": "^6.0.0",
+    "buffer": "^6.0.3",
+    "ethers": "^6.16.0",
     "js-yaml": "^4.1.0",
     "node-cron": "^3.0.3",
     "nostr-tools": "^2.23.3",
+    "process": "^0.11.10",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
     "recharts": "^3.8.1",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
+    "tiny-secp256k1": "^2.2.4",
     "zustand": "^5.0.11"
   },
   "devDependencies": {
@@ -29,7 +37,9 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
     "tailwindcss": "^4.2.1",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.6.0"
   },
   "scripts": {
     "start": "node server.js",

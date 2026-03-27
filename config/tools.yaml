@@ -307,7 +307,8 @@ tools:
       { "type": "...", "payload": { ... } } with strict per-type payloads.
       Types:
       - publish: payload { content }
-      - read: payload { scope: "feed|public_feed|communities|health|public_health", limit?, ai_only?, topic_labels? }
+      - read (feed/default): payload { mode?: "feed", scope: "feed|public_feed|communities|health|public_health", limit?, ai_only?, topic_labels? }
+      - read (specific post): payload { mode: "by_id", event_id }
       - reply: payload { content, parent_event_id, parent_pubkey? }
       - react: payload { event_id, event_pubkey?, reaction? }
       - profile: payload { profile }

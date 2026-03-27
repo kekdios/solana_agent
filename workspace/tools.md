@@ -17,7 +17,8 @@ Do not say you cannot do something if a tool exists for it. Call the right tool 
 Use **`nostr_action`** as the default and preferred path for all Nostr tasks. This improves reliability by avoiding tool-routing ambiguity.
 
 - **Publish post:** `nostr_action({ type: "publish", payload: { content: "..." } })`
-- **Read feed:** `nostr_action({ type: "read", payload: { scope: "feed", limit: 20, ai_only: true } })` — `ai_only` uses OR of labels `ai`, `blockchain`, `defi` (override with `topic_labels`).
+- **Read feed (default mode):** `nostr_action({ type: "read", payload: { mode: "feed", scope: "feed", limit: 20, ai_only: true } })` — `ai_only` uses OR of labels `ai`, `blockchain`, `defi` (override with `topic_labels`).
+- **Read specific post by id:** `nostr_action({ type: "read", payload: { mode: "by_id", event_id: "<64-char hex>" } })`.
 - **Read communities:** `nostr_action({ type: "read", payload: { scope: "communities" } })`
 - **Health:** `nostr_action({ type: "read", payload: { scope: "health" } })`
 - **Public feed:** `nostr_action({ type: "read", payload: { scope: "public_feed", limit: 20 } })`

@@ -45,7 +45,8 @@ In chat, say e.g. "swap $5 SOL to USDC". Use the **Execute** button in the swap 
 ### Nostr (pure direct relays)
 - Use **\`nostr_action\`** for Nostr tasks in chat:
   - publish: \`nostr_action({ type: "publish", payload: { content: "..." } })\`
-  - read feed/health/communities: \`nostr_action({ type: "read", payload: { scope: "feed", ai_only: true } })\` (optional \`topic_labels\`; or \`public_feed\`, \`communities\`, \`health\`, \`public_health\`)
+  - read feed/health/communities (default mode): \`nostr_action({ type: "read", payload: { mode: "feed", scope: "feed", ai_only: true } })\` (optional \`topic_labels\`; or \`public_feed\`, \`communities\`, \`health\`, \`public_health\`)
+  - read one post by id: \`nostr_action({ type: "read", payload: { mode: "by_id", event_id: "<64-char hex>" } })\`
   - reply/react/profile are supported in direct mode.
 - Configure signing with **\`NOSTR_NSEC\`** (optional **\`NOSTR_NPUB\`**) and optional **\`NOSTR_RELAYS\`** in \`.env\`.
 - Use **Sidebar -> Nostr** to view this agent's own kind-1111 posts with paging.

@@ -41,6 +41,10 @@ function excerpt(s, max = 220) {
   return t.length > max ? t.slice(0, max) + "…" : t;
 }
 
+function isHex64(v) {
+  return /^[a-f0-9]{64}$/i.test(String(v || "").trim());
+}
+
 function normalizeResult(type, source, raw) {
   const ok = raw && typeof raw === "object" ? !(raw.ok === false || raw.error) : false;
   return {
@@ -171,7 +175,10 @@ function makeSignedEvent(kind, content, tags, sk) {
 }
 
 async function readScope(payload, env) {
-  const scope = String(payload.scope || "")
+  const mode = String(payload.mode || "feed")
+    .trim()
+    .toLowerCase();
+  const scope = String(payload.scope || "feed")
     .trim()
     .toLowerCase();
   const relays = getRelayList(env);
@@ -180,6 +187,88 @@ async function readScope(payload, env) {
   const npub = getNpubFromEnv(env);
   const signerPubkey = sk ? getPublicKey(sk) : null;
   const signerNpub = signerPubkey ? nip19.npubEncode(signerPubkey) : npub;
+
+  if (mode !== "feed" && mode !== "by_id") {
+    return {
+      ok: false,
+      error: `INVALID_MODE: ${mode}`,
+      code: "INVALID_MODE",
+      agent_report: "nostr_action rejected: read mode must be feed or by_id.",
+    };
+  }
+
+  if (mode === "by_id") {
+    if (
+      payload.scope != null ||
+      payload.limit != null ||
+      payload.ai_only != null ||
+      payload.topic_labels != null
+    ) {
+      return {
+        ok: false,
+        error: "EXTRA_FIELD_NOT_ALLOWED: payload.scope|limit|ai_only|topic_labels with mode=by_id",
+        code: "EXTRA_FIELD_NOT_ALLOWED",
+        agent_report:
+          "nostr_action read_by_id accepts payload.mode + payload.event_id only.",
+      };
+    }
+    const eventId = String(payload.event_id || "").trim();
+    if (!eventId) {
+      return {
+        ok: false,
+        error: "MISSING_REQUIRED_FIELD: payload.event_id",
+        code: "MISSING_REQUIRED_FIELD",
+        agent_report: "nostr_action read_by_id requires payload.event_id.",
+      };
+    }
+    if (!isHex64(eventId)) {
+      return {
+        ok: false,
+        error: "INVALID_EVENT_ID: event_id must be 64-char hex",
+        code: "INVALID_EVENT_ID",
+        agent_report: "nostr_action read_by_id rejected: invalid event_id format.",
+      };
+    }
+    const q = await queryEvents({ relays, filter: { ids: [eventId], limit: 1 }, timeoutMs: 12000 });
+    if (!q.ok) {
+      return {
+        ok: false,
+        error: q.error || "Relay query failed",
+        code: "RELAY_QUERY_FAILED",
+        read_mode: mode,
+      };
+    }
+    const ev = Array.isArray(q.events) && q.events.length ? q.events[0] : null;
+    if (!ev) {
+      return {
+        ok: true,
+        read_mode: mode,
+        event_id_requested: eventId,
+        event_found: false,
+        summary: { event_found: false, relays_used: relays.length },
+        relays,
+        agent_report: `No event found for id \`${eventId}\` on configured relays.`,
+      };
+    }
+    const post = {
+      id: ev.id,
+      pubkey: ev.pubkey,
+      created_at: ev.created_at ? new Date(ev.created_at * 1000).toISOString() : null,
+      content: ev.content != null ? String(ev.content) : "",
+      kind: ev.kind,
+      tags: Array.isArray(ev.tags) ? ev.tags : [],
+    };
+    return {
+      ok: true,
+      read_mode: mode,
+      event_id_requested: eventId,
+      event_found: true,
+      post,
+      relays,
+      summary: { event_found: true, relays_used: relays.length, kind: ev.kind },
+      agent_report: `Loaded event \`${ev.id}\` (kind ${ev.kind}) from configured relays.`,
+    };
+  }
 
   if (scope === "health") {
     const relayLine = relays.length ? relays.join(", ") : "(none — defaults apply if unset)";
@@ -198,6 +287,7 @@ async function readScope(payload, env) {
       },
       endpoint: "nostr://direct",
       read_scope: scope,
+      read_mode: mode,
     };
   }
 
@@ -210,6 +300,7 @@ async function readScope(payload, env) {
       summary: { ok: true, relays_count: relays.length, relays },
       endpoint: "nostr://direct",
       read_scope: scope,
+      read_mode: mode,
     };
   }
 
@@ -235,6 +326,7 @@ async function readScope(payload, env) {
       communities: list,
       endpoint: "nostr://direct",
       read_scope: scope,
+      read_mode: mode,
     };
   }
 
@@ -284,6 +376,7 @@ async function readScope(payload, env) {
     posts_preview: previews,
     endpoint: "nostr://direct",
     read_scope: scope,
+    read_mode: mode,
     relays,
   };
 }
@@ -318,7 +411,7 @@ export async function nostrAction(args = {}, env = {}) {
   }
 
   if (t === "read") {
-    const guard = rejectUnknownPayloadFields(payload, new Set(["scope", "limit", "ai_only", "topic_labels"]), "payload");
+    const guard = rejectUnknownPayloadFields(payload, new Set(["mode", "event_id", "scope", "limit", "ai_only", "topic_labels"]), "payload");
     if (guard) return normalizeResult(t, "nostr_direct", { ...guard, agent_report: guard.error });
     return normalizeResult(t, "nostr_direct", await readScope(payload, env));
   }

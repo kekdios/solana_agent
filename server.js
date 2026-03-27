@@ -409,7 +409,7 @@ const PARAM_SCHEMAS = {
       payload: {
         type: "object",
         description:
-          "Strict payload shape depends on type. publish: {content}. read: {scope: feed|public_feed|communities|health|public_health, limit?, ai_only?, topic_labels?}.",
+          "Strict payload shape depends on type. publish: {content}. read feed(default): {mode?: feed, scope: feed|public_feed|communities|health|public_health, limit?, ai_only?, topic_labels?}. read by id: {mode: by_id, event_id}.",
       },
     },
     required: ["type", "payload"],
@@ -1948,6 +1948,41 @@ const server = createServer(async (req, res) => {
       await conn.getSlot();
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, network: getSolanaNetworkFromRpc(rpcUrl) }));
+    } catch (e) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e?.message || String(e) }));
+    }
+    return;
+  }
+  /** Mining page: SOL balance for an arbitrary address (server-side RPC — browser calls to api.mainnet-beta.solana.com often get HTTP 403). */
+  if (path === "/api/mining/sol-balance" && req.method === "GET") {
+    const reqUrl = new URL(req.url || "/", "http://127.0.0.1");
+    const address = (reqUrl.searchParams.get("address") || "").trim();
+    if (!address) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "missing address" }));
+      return;
+    }
+    try {
+      new PublicKey(address);
+    } catch (_) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "invalid Solana address" }));
+      return;
+    }
+    const explicit = (loadConfigKey("MINING_SOL_RPC_URL") || process.env.MINING_SOL_RPC_URL || "").trim();
+    let rpcUrl = explicit;
+    if (!rpcUrl) {
+      rpcUrl =
+        getSolanaNetworkFromRpc(configSolanaRpc) === "mainnet"
+          ? configSolanaRpc
+          : "https://rpc.ankr.com/solana";
+    }
+    try {
+      const conn = new Connection(rpcUrl, { commitment: "confirmed" });
+      const lamports = await conn.getBalance(new PublicKey(address));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, lamports }));
     } catch (e) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e?.message || String(e) }));

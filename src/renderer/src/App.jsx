@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useChatStore } from "./store/chatStore";
 import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
@@ -10,6 +10,8 @@ import NanoGptPage from "./components/NanoGptPage";
 import NostrPage from "./components/NostrPage";
 import Settings from "./components/Settings";
 import TrendPage from "./components/TrendPage";
+
+const MiningPage = lazy(() => import("./components/MiningPage.jsx"));
 
 function formatTokens(n) {
   if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
@@ -112,6 +114,16 @@ function App() {
           <TradingPage />
         ) : view === "nostr" ? (
           <NostrPage />
+        ) : view === "mining" ? (
+          <Suspense
+            fallback={
+              <div className="flex-1 flex items-center justify-center min-h-0 bg-[#0d0d0f] text-slate-500 text-sm">
+                Loading Mining…
+              </div>
+            }
+          >
+            <MiningPage />
+          </Suspense>
         ) : view === "trend" ? (
           <TrendPage />
         ) : view === "allMessages" ? (

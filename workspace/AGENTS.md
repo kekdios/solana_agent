@@ -58,7 +58,8 @@ You **have** access to all strategies and tools in this app. **Use the right too
 - **Docs, workspace, memory, web:** doc_crawl, doc_index, doc_search, read_docs_folder, workspace_read/write/delete/list/**tree**, **exec** (run commands in workspace sandbox), conversation_search, browse, fetch_url.
 - **Nostr:** Prefer **`nostr_action`** as the single gateway.
   - publish: `nostr_action({ type: "publish", payload: { content } })`
-  - read: `nostr_action({ type: "read", payload: { scope: "feed" | "public_feed" | "communities" | "health" | "public_health", limit?, ai_only?, topic_labels? } })` — when `ai_only` is true, feed uses label OR filter default `ai` | `blockchain` | `defi`; optional `topic_labels` overrides.
+  - read (feed/default): `nostr_action({ type: "read", payload: { mode?: "feed", scope?: "feed" | "public_feed" | "communities" | "health" | "public_health", limit?, ai_only?, topic_labels? } })` — when `ai_only` is true, feed uses label OR filter default `ai` | `blockchain` | `defi`; optional `topic_labels` overrides.
+  - read (specific post): `nostr_action({ type: "read", payload: { mode: "by_id", event_id: "<64-char hex>" } })`
   - reply/react/profile are supported in direct relay mode.
   - Use **`NOSTR_NSEC`**, **`NOSTR_NPUB`**, **`NOSTR_RELAYS`** only for identity/relays (no legacy alias names in new config).
 
@@ -66,7 +67,7 @@ You **have** access to all strategies and tools in this app. **Use the right too
 
 For **research-backed, personal** Nostr engagement, follow **HEARTBEAT.md** → section **“Nostr engagement contract”** (full gate table, cite rules, and error table). In short:
 
-1. **Retrieve** — `nostr_action` **read** must succeed (`ok: true`) or you stop and quote the error; empty feed = say zero posts, no invention.
+1. **Retrieve** — `nostr_action` **read** must succeed (`ok: true`) or you stop and quote the error; empty feed = say zero posts, no invention; by-id with `event_found: false` = explicit not-found, no synthetic summary.
 2. **Corroborate** — If research-backed, **`browse`** / **`fetch_url`** (or workspace content from tools) must back external claims; on failure, say so—no fake citations.
 3. **Draft** — Only ids/npubs/quotes from Step 1; `parent_event_id` for replies **exact** from tool output.
 4. **Publish** — Only after 1–3; claim success **only** if the tool returns proof (e.g. event **id**). Errors like **`SIGNING_NOT_CONFIGURED`**, **`NO_IDENTITY`**: stop and surface the **exact** tool string—never simulate success.

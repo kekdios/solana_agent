@@ -30,7 +30,7 @@ Reports use **only** data from actual tool results (`nostr_action`, `browse`, `f
 
 | Step | What to do | Gate to continue |
 |------|------------|-------------------|
-| **1 — Retrieve** | `nostr_action` with `type: "read"` and valid **`scope`**: `feed` \| `public_feed` \| `communities` \| `health` \| `public_health`. (`ai_only` is a **boolean**, not a scope.) | Tool returns **`ok: true`**. If the list is empty, say **zero posts** and do not invent a feed. If **`ok: false`**, **stop** and report the tool error **verbatim**. |
+| **1 — Retrieve** | `nostr_action` read in either mode: **feed** (`payload.mode` omitted or `"feed"` + valid `scope`: `feed` \| `public_feed` \| `communities` \| `health` \| `public_health`) or **specific post** (`payload.mode: "by_id"` + `event_id`). (`ai_only` is a **boolean**, feed mode only.) | Tool returns **`ok: true`**. Feed mode empty list = say **zero posts**; by-id mode with `event_found: false` = say not found on queried relays. If **`ok: false`**, **stop** and report the tool error **verbatim**. |
 | **2 — Corroborate** | When “research-backed” applies: **`browse`** and/or **`fetch_url`** (or **`workspace_read`** of content produced by earlier tools in this session). | At least one **successful** corroboration **or** state clearly that search/fetch failed or returned nothing—**no** fake URLs, papers, or articles. If Step 1 did not succeed, **do not** pick a fallback topic from imagination. |
 | **3 — Draft** | Draft reply or top-level **content** only from Step 1 text/ids (and external claims **only** from Step 2). | For **reply**: `parent_event_id` is copied **exactly** from Step 1 tool output. No ids from memory or training data. |
 | **4 — Publish** | `nostr_action` with `type: "reply"` or `type: "publish"` as appropriate. | Only after Steps 1–3 are satisfied for this run. After the tool returns, report **only** what appears in **`action_result`** / **`agent_report`** (e.g. event id). If there is no id in the tool output, **do not** claim a successful publish. |
@@ -65,6 +65,18 @@ Reports use **only** data from actual tool results (`nostr_action`, `browse`, `f
   **`scope` must be** `feed` | `public_feed` | `communities` | `health` | `public_health` — **not** `ai_only` (`ai_only` is a separate boolean flag).
 - **Analyze:** From **`agent_report`** / **`posts_preview`** / structured fields in the tool result only—describe dominant themes **without** fabricating counts unless the tool returned counts.
 - **Output:** Short summary + **only** excerpts copied or lightly trimmed from tool output. If the tool returned no posts, say so and **do not** proceed to publish.
+
+### Step 1 cookbook (copy-ready)
+
+- **Feed summarize + comment path (default):**
+  1) `nostr_action({ "type": "read", "payload": { "mode": "feed", "scope": "feed", "limit": 10, "ai_only": true } })`
+  2) summarize from `posts_preview`/`agent_report`
+  3) optional draft comment/post
+
+- **Targeted reply by event id path:**
+  1) `nostr_action({ "type": "read", "payload": { "mode": "by_id", "event_id": "<64-char-hex>" } })`
+  2) require `event_found: true` before drafting
+  3) `nostr_action({ "type": "reply", "payload": { "content": "<draft>", "parent_event_id": "<same id>" } })`
 
 ---
 
