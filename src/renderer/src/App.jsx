@@ -9,7 +9,7 @@ import AllMessagesPage from "./components/AllMessagesPage";
 import NanoGptPage from "./components/NanoGptPage";
 import NostrPage from "./components/NostrPage";
 import Settings from "./components/Settings";
-import TrendPage from "./components/TrendPage";
+import LiquidityPage from "./components/LiquidityPage";
 
 const MiningPage = lazy(() => import("./components/MiningPage.jsx"));
 
@@ -124,8 +124,8 @@ function App() {
           >
             <MiningPage />
           </Suspense>
-        ) : view === "trend" ? (
-          <TrendPage />
+        ) : view === "liquidity" || view === "trend" ? (
+          <LiquidityPage />
         ) : view === "allMessages" ? (
           <AllMessagesPage />
         ) : view === "nanogpt" ? (

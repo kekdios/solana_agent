@@ -1,39 +1,39 @@
 {
   "schema_version": 1,
-  "server_received_at": "2026-03-27T10:37:30.262Z",
+  "server_received_at": "2026-06-27T23:34:24.862Z",
   "client": {
     "schema_version": 1,
-    "updated_at": "2026-03-27T10:37:30.226Z",
-    "ui_last_updated_ms": 1774607850226,
+    "updated_at": "2026-06-27T23:34:24.800Z",
+    "ui_last_updated_ms": 1782603264800,
     "data_source": "coingecko_via_app_proxy",
     "from_cache": false,
-    "market_state": "NO_WAVE",
-    "last_day": "2026-03-27",
+    "market_state": "TRANSITION",
+    "last_day": "2026-06-27",
     "prices_usd": {
-      "btc": 67652.76075958881,
-      "eth": 2040.6521020478353,
-      "sol": 85.01567190128077
+      "btc": 59908.50502608809,
+      "eth": 1570.5805552040902,
+      "sol": 70.39671239032994
     },
     "vwap_distance_pct": {
-      "btc": -4.35322645531811,
-      "eth": -6.459999410254058,
-      "sol": -6.102278274938114
+      "btc": -13.794869908245811,
+      "eth": -23.236740946993457,
+      "sol": -8.095795007094031
     },
     "ratios": {
-      "eth_btc": 0.030163619032481274,
-      "sol_eth": 0.04166103169470477,
-      "sol_btc": 0.0012566474885392022
+      "eth_btc": 0.026216320279068162,
+      "sol_eth": 0.044822095980414194,
+      "sol_btc": 0.0011750704238016722
     },
     "breadth": {
       "eth_ecosystem": 0,
-      "sol_ecosystem": 0
+      "sol_ecosystem": 1
     },
     "social_comment_bullets": [
-      "Regime (rules-based): NO_WAVE.",
-      "Last daily bar date: 2026-03-27.",
-      "BTC ~$67,653 vs anchored VWAP (distance -4.35%).",
-      "Breadth (share of basket above 20d SMA): ETH 0%, SOL 0%.",
-      "Ratios (close): ETH/BTC 0.03016, SOL/BTC 0.001257."
+      "Regime (rules-based): TRANSITION.",
+      "Last daily bar date: 2026-06-27.",
+      "BTC ~$59,909 vs anchored VWAP (distance -13.79%).",
+      "Breadth (share of basket above 20d SMA): ETH 0%, SOL 100%.",
+      "Ratios (close): ETH/BTC 0.02622, SOL/BTC 0.001175."
     ],
     "disclaimer": "Rule-based dashboard from daily CoinGecko data; not financial advice. Refresh Trend to update."
   }

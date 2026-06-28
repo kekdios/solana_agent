@@ -194,17 +194,16 @@ export default function Sidebar() {
         </button>
         <button
           type="button"
-          onClick={() => setView("trend")}
-          className={`${navItemClass} ${view === "trend" ? "bg-emerald-500/20 text-emerald-400" : ""}`}
-          title="Trend dashboard (BTC/ETH/SOL VWAP, breadth, ratios)"
+          onClick={() => setView("liquidity")}
+          className={`${navItemClass} ${view === "liquidity" || view === "trend" ? "bg-emerald-500/20 text-emerald-400" : ""}`}
+          title="BTC liquidity regime — stables, funding, ETF volume proxy"
         >
           <span className={iconClass} aria-hidden>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="3 17 9 11 13 15 21 7" />
-              <polyline points="14 7 21 7 21 14" />
+              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
             </svg>
           </span>
-          Trend
+          Liquidity
         </button>
         <button
           type="button"

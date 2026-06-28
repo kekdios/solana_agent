@@ -31,7 +31,8 @@ import { DEFAULT_SA_AGENT_TOKEN_MINTS, loadSaAgentTokenMints } from "./tools/sa-
 import { runPegMonitorTick, getPegMonitorEnvResolved } from "./tools/peg-monitor.js";
 import * as jupiter from "./tools/jupiter.js";
 import * as execModule from "./tools/exec.js";
-import * as trendSnapshot from "./tools/trend-snapshot.js";
+import * as btcLiquidity from "./tools/btc-liquidity.js";
+import * as btcLiquiditySnapshot from "./tools/btc-liquidity-snapshot.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const INCEPTION_API = "https://api.inceptionlabs.ai/v1/chat/completions";
@@ -42,8 +43,9 @@ const DEFAULT_NANOGPT_MODEL = "x-ai/grok-4-fast";
 /** Injected into the first-turn system message (concatenated, in order). Keep lean; full repo TOOLS.md is separate. */
 const WORKSPACE_FILES = ["SOUL.md", "AGENTS.md", "tools.md", "skills/nostr/SKILLS.md"];
 
-/** Jupiter swap program ID (mainnet). Used to detect Jupiter transactions vs spam/other. */
-const JUPITER_PROGRAM_ID = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+/** In-memory cache for GET /api/liquidity/btc-regime. */
+const btcLiquidityRegimeCache = { t: 0, body: null };
+const BTC_LIQUIDITY_CACHE_MS = 2 * 60 * 1000;
 
 /** Workspace root: config table > env > default. Defined after loadConfigKey. */
 function getWorkspaceDir() {
@@ -400,21 +402,23 @@ const PARAM_SCHEMAS = {
   clear_expired_swap_intents: { type: "object", properties: {}, required: [] },
   nostr_action: {
     type: "object",
+    description:
+      "Only Nostr gateway. Signing uses server NOSTR_NSEC (Settings)—do not ask the user to paste nsec for routine posts.",
     properties: {
       type: {
         type: "string",
         description:
-          "Action type: publish | read | reply | react | profile.",
+          "publish | read | reply | react | profile. publish=Kind 1 note; read=relay queries (no signing).",
       },
       payload: {
         type: "object",
         description:
-          "Strict payload shape depends on type. publish: {content}. read feed(default): {mode?: feed, scope: feed|public_feed|communities|health|public_health, limit?, ai_only?, topic_labels?}. read by id: {mode: by_id, event_id}.",
+          "Per type: publish {content}. read { scope: feed|public_feed|… } or { mode: by_id, event_id }. reply/react/profile: see tool docs.",
       },
     },
     required: ["type", "payload"],
   },
-  trend_snapshot_read: { type: "object", properties: {}, required: [] },
+  liquidity_regime_read: { type: "object", properties: {}, required: [] },
 };
 
 function loadToolRegistry() {
@@ -536,7 +540,7 @@ function toolAllowedByTier(tier, name, args) {
     "jupiter_quote",
     "hyperliquid_price",
     "treasury_pool_info",
-    "trend_snapshot_read",
+    "liquidity_regime_read",
   ]);
   if (alwaysAllow.has(name)) return true;
 
@@ -719,8 +723,8 @@ async function runTool(name, args, env) {
         });
       case "nostr_action":
         return await nostrActionDirect(args, env);
-      case "trend_snapshot_read":
-        return await trendSnapshot.readTrendSnapshotForTool();
+      case "liquidity_regime_read":
+        return await btcLiquiditySnapshot.readBtcLiquiditySnapshotForTool();
       // Redirect legacy EVM-style names to Solana (app is Solana-only)
       case "account_balance":
         return await solana.solanaBalance(args, {
@@ -1787,6 +1791,18 @@ function getChatBackendConfig() {
   return { url: INCEPTION_API, model: "mercury-2", apiKey };
 }
 
+/** Chat completion `message`: reasoning models (e.g. Claude via NanoGPT) often leave `content` empty and put text in `reasoning` / `reasoning_content`. */
+function assistantMessageVisibleText(m) {
+  if (!m || typeof m !== "object") return "";
+  const c = String(m.content ?? "").trim();
+  if (c) return c;
+  for (const k of ["reasoning", "reasoning_content"]) {
+    const v = m[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return "";
+}
+
 function getSolanaKeypairFromConfig() {
   const dec = loadConfigKey("SOLANA_PRIVATE_KEY");
   if (!dec || !String(dec).trim()) return null;
@@ -1857,82 +1873,39 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  /** Trend page: proxy CoinGecko so the renderer uses same-origin /api (avoids browser/Electron NetworkError on direct HTTPS). */
-  const trendCgMatch = path.match(/^\/api\/trend\/coingecko\/v3\/coins\/([^/]+)\/market_chart$/);
-  if (trendCgMatch && req.method === "GET") {
-    let id;
+  /** BTC Liquidity Regime panel — aggregated watch indicators + snapshot for agent. */
+  if (path === "/api/liquidity/btc-regime" && req.method === "GET") {
+    const force = url.searchParams.get("refresh") === "1";
+    const now = Date.now();
+    if (
+      !force &&
+      btcLiquidityRegimeCache.body &&
+      now - btcLiquidityRegimeCache.t < BTC_LIQUIDITY_CACHE_MS
+    ) {
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "X-Liquidity-Cache": "hit",
+      });
+      res.end(btcLiquidityRegimeCache.body);
+      return;
+    }
     try {
-      id = decodeURIComponent(trendCgMatch[1]);
-    } catch {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Invalid coin id" }));
-      return;
-    }
-    if (!/^[a-z0-9-]+$/i.test(id) || id.length > 120) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Invalid coin id" }));
-      return;
-    }
-    const qs = url.search || "";
-    const upstream = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart${qs}`;
-    try {
-      const headers = { Accept: "application/json" };
-      const cgKey = process.env.COINGECKO_API_KEY;
-      if (cgKey && String(cgKey).trim()) {
-        headers["x-cg-demo-api-key"] = String(cgKey).trim();
-      }
-      const r = await fetch(upstream, { headers, signal: AbortSignal.timeout(60000) });
-      const body = await r.text();
-      res.writeHead(r.status, { "Content-Type": "application/json" });
-      res.end(body);
-    } catch (e) {
-      res.writeHead(502, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: e?.message || String(e) }));
-    }
-    return;
-  }
-
-  /** Trend page: persist latest computed stats for the agent (trend_snapshot_read). */
-  if (path === "/api/trend/stats" && req.method === "POST") {
-    let body = "";
-    for await (const chunk of req) body += chunk;
-    if (body.length > 262144) {
-      res.writeHead(413, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "Body too large" }));
-      return;
-    }
-    let client;
-    try {
-      client = JSON.parse(body || "{}");
-    } catch {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "Invalid JSON" }));
-      return;
-    }
-    if (!client || typeof client !== "object" || Array.isArray(client)) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "Expected a JSON object" }));
-      return;
-    }
-    if (Number(client.schema_version) !== 1) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "schema_version must be 1" }));
-      return;
-    }
-    const record = {
-      schema_version: 1,
-      server_received_at: new Date().toISOString(),
-      client,
-    };
-    try {
-      const w = await trendSnapshot.writeTrendSnapshotRecord(record);
-      if (!w.ok) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: w.error || "Write failed" }));
-        return;
-      }
+      const payload = await btcLiquidity.buildBtcLiquidityRegime();
+      const record = {
+        schema_version: 1,
+        server_received_at: new Date().toISOString(),
+        ...payload,
+      };
+      const w = await btcLiquiditySnapshot.writeBtcLiquiditySnapshot(record);
+      const body = JSON.stringify({
+        ...payload,
+        snapshot_path: w.ok ? w.path : undefined,
+        snapshot_ok: w.ok,
+      });
+      btcLiquidityRegimeCache.t = now;
+      btcLiquidityRegimeCache.body = body;
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, path: w.path }));
+      res.end(body);
     } catch (e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e?.message || String(e) }));
@@ -3166,23 +3139,16 @@ const server = createServer(async (req, res) => {
       // negatives (e.g. paraphrases about HEARTBEAT.md / file content) so the model
       // sometimes received no tools and falsely claimed it had no filesystem access.
       const sendTools = true;
-      const lastUserContent = messages.filter((m) => m.role === "user").pop()?.content ?? "";
-      const suggestsNostr =
-        /\b(nostr|nsec|npub|relay|kind\s*1|nip-|nostr_action)\b/i.test(lastUserContent);
-      const conversationMentionsNostr = messages.some((m) =>
-        /\b(nostr_action|nostr\.|#nostr)\b/i.test(m.content || "")
-      );
       if (sendTools) {
         const workspaceText = loadWorkspace();
         const walletRule =
           "Wallet: use solana_balance and solana_address only. There are no account_balance or account_address tools—call solana_balance for balance, solana_address for address.\n\n" +
           "**Treasury Orca (`treasury_pool_swap`):** Live swaps are **not** blocked by Settings → Swaps **`SWAPS_EXECUTION_ENABLED`** or **`SWAPS_ENABLED`** (Jupiter-only gates). If a `treasury_pool_swap` tool message lacks **`_treasury_swap_server`**, it is not from this server—do not invent errors like EXECUTION_DISABLED for this tool.\n\n";
         const nostrRule =
-          suggestsNostr || conversationMentionsNostr
-            ? "**Nostr (direct relays):** use **nostr_action** only. Publish: `{type:'publish', payload:{content}}` (requires **NOSTR_NSEC**). " +
-              "Read: `{type:'read', payload:{scope:'feed'|'public_feed'|'communities'|'health'|'public_health', limit?, ai_only?, topic_labels?}}` (with `ai_only`, feed uses OR of `l` labels ai|blockchain|defi unless `topic_labels` overrides). " +
-              "Reply / react / profile use the same tool with matching `type` and payload. Prefer **`agent_report`** in the tool result for user-facing text.\n\n"
-            : "";
+          "**Nostr (always available in this app):** The **only** Nostr tool is **`nostr_action`**—use that exact name; do not invent a separate \"nostr tool\" or HTTP dashboard. " +
+          "**Signing** (publish / reply / react / profile) uses **`NOSTR_NSEC`** and relays stored **on this server** (Settings / env). **Do not** ask the user to paste an **nsec** into chat for normal posting—when they want a post and **`NOSTR_NSEC`** is set, call **`nostr_action`** e.g. `{ type: 'publish', payload: { content: '...' } }` (mutating actions need security tier ≥2). " +
+          "If **`NOSTR_NSEC`** is not configured, say publishing is not configured and tell them to set **`NOSTR_NSEC`** in Settings—still **do not** solicit secrets in chat. " +
+          "**Read** (relays): `{ type: 'read', payload: { scope: 'feed' | 'public_feed' | 'communities' | 'health' | 'public_health', limit?, ai_only?, topic_labels? } }` or `{ mode: 'by_id', event_id }` (tier 1 for read). Prefer **`agent_report`** in the tool result for user-facing text.\n\n";
         const reportingRule =
           "Execution reporting contract:\n" +
           "- You may report action outcomes ONLY from tool result objects present in this turn.\n" +
@@ -3190,7 +3156,8 @@ const server = createServer(async (req, res) => {
           "- Never invent tx signatures, intent IDs, payment IDs, post IDs, or event IDs.\n" +
           "- Never quote or paraphrase tool JSON unless it appeared verbatim in a **`role: tool`** message in this same API turn. Never say you are \"simulating\" or \"reconstructing\" tool output from chat history—that is fabrication.\n" +
           "- **Workspace file lists:** For \"list files\", \"ls\", \"locate [file]\", \"show contents\", or \"what's in the workspace\", you MUST call **`workspace_tree`** or **`workspace_list`** (or **`exec`** with ls/find) and report ONLY that output. Never invent paths like /app, fake src/, or repo-root solagent.db.\n" +
-          "- **Never** say you have \"no tools\", \"no file access\", or that you \"cannot use ls/find\" — this Solana Agent chat **always** sends you function tools (`workspace_tree`, `workspace_list`, `workspace_read`, `exec`, wallet, etc.). If you claim otherwise, you are wrong. The peg checklist file is **`HEARTBEAT.md`** at the workspace root (often shown as `heartbeat.md`); call **`workspace_tree`** then **`workspace_read`** with the exact path from the tool result.\n" +
+          "- **Never** say you have \"no tools\", \"no file access\", or that you \"cannot use ls/find\" — this Solana Agent chat **always** sends you function tools (`workspace_tree`, `workspace_list`, `workspace_read`, `exec`, wallet, **`nostr_action`**, etc.). If you claim otherwise, you are wrong. The peg checklist file is **`HEARTBEAT.md`** at the workspace root (often shown as `heartbeat.md`); call **`workspace_tree`** then **`workspace_read`** with the exact path from the tool result.\n" +
+          "- **Nostr:** When describing capability, say you use **`nostr_action`** with server **`NOSTR_NSEC`**—not a generic third-party flow.\n" +
           "- If tool mode is simulated, state clearly that no live transaction occurred.\n\n";
         if (workspaceText) {
           currentMessages = [
@@ -3275,13 +3242,13 @@ const server = createServer(async (req, res) => {
 
         currentMessages.push({
           role: "assistant",
-          content: msg.content ?? null,
+          content: assistantMessageVisibleText(msg) || msg.content || null,
           tool_calls: msg.tool_calls,
         });
 
         const toolCalls = msg.tool_calls;
         if (!toolCalls?.length) {
-          let assistantContent = (msg.content ?? "").trim();
+          let assistantContent = assistantMessageVisibleText(msg);
           if (toolResultsForFrontend.length > 0 && looksLikeToolArgs(assistantContent)) {
             assistantContent = "I ran the requested tools. See the results above.";
           }
@@ -3355,7 +3322,7 @@ const server = createServer(async (req, res) => {
       }
 
       const lastChoice = lastData?.choices?.[0];
-      let lastContent = (lastChoice?.message?.content ?? "").trim() || "(Tool loop limit reached.)";
+      let lastContent = assistantMessageVisibleText(lastChoice?.message) || "(Tool loop limit reached.)";
       if (toolResultsForFrontend.length > 0 && lastContent === "(Tool loop limit reached.)") {
         const toolList = toolResultsForFrontend.map((tr) => tr.tool).join(", ");
         lastContent = `I ran: ${toolList}. Ask me to summarize what I found or what to do next.`;
@@ -4023,6 +3990,18 @@ const server = createServer(async (req, res) => {
       res.end(readFileSync(indexHtml));
       return;
     }
+  }
+  if (path.startsWith("/api")) {
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        ok: false,
+        error: "Unknown API route or method.",
+        path,
+        method: req.method || "GET",
+      })
+    );
+    return;
   }
   const filePath = join(__dirname, path.slice(1));
   if (!filePath.startsWith(__dirname) || !existsSync(filePath)) {

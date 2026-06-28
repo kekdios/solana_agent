@@ -1,8 +1,8 @@
 {
-  "nextTickFull": true,
-  "lastRunAt": "2026-03-26T15:36:42.597Z",
+  "nextTickFull": false,
+  "lastRunAt": "2026-04-12T23:44:33.757Z",
   "lastChecks": {
-    "sbtc": "2026-03-26T15:13:56.701Z",
-    "saeth": "2026-03-26T15:13:56.701Z"
+    "sbtc": "2026-04-12T23:44:33.757Z",
+    "saeth": "2026-04-12T23:44:33.757Z"
   }
 }

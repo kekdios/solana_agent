@@ -1,24 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import * as bip39 from "bip39";
 import { HDNodeWallet, JsonRpcProvider, formatEther } from "ethers";
 import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "tiny-secp256k1";
 import BIP32Factory from "bip32";
 import { Keypair } from "@solana/web3.js";
+import bs58 from "bs58";
 import { deriveSolanaSeedFromBip39Seed } from "../utils/solanaSlip0010.js";
-import {
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  ResponsiveContainer,
-  CartesianGrid,
-  Legend,
-} from "recharts";
 import { useChatStore } from "../store/chatStore";
 
 let bip32Singleton = null;
@@ -30,11 +18,80 @@ function getBip32() {
   return bip32Singleton;
 }
 
-const ETH_RPC = "https://eth.llamarpc.com";
+/**
+ * Public Ethereum HTTP RPCs (browser). Free tiers rate-limit; we rotate and retry on 429.
+ * Override at build time: VITE_ETH_RPC_URL="https://..." or comma-separated list (tried first).
+ */
+const DEFAULT_ETH_RPCS = [
+  "https://ethereum.publicnode.com",
+  "https://rpc.ankr.com/eth",
+  "https://cloudflare-eth.com",
+  "https://eth.llamarpc.com",
+];
 
-const provider = new JsonRpcProvider(ETH_RPC);
+function ethRpcCandidates() {
+  const raw = typeof import.meta !== "undefined" && import.meta.env?.VITE_ETH_RPC_URL;
+  const fromEnv = String(raw || "")
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const seen = new Set();
+  const out = [];
+  for (const u of [...fromEnv, ...DEFAULT_ETH_RPCS]) {
+    if (seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
+}
 
-const PIE_COLORS = ["#627eea", "#f7931a", "#9945ff"];
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function isRateLimitedEthError(e) {
+  const msg = String(e?.message || e || "");
+  const code = e?.code ?? e?.error?.code;
+  if (code === 429) return true;
+  if (/429|rate-?limit|too many requests/i.test(msg)) return true;
+  try {
+    const j = JSON.stringify(e?.error || e?.info || {});
+    if (/429|rate-?limit/i.test(j)) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/** Try several RPC URLs with short backoff on 429 (ethers v6 public endpoints are strict). */
+async function getEthBalanceWei(address) {
+  const urls = ethRpcCandidates();
+  let lastErr = null;
+  for (const url of urls) {
+    const provider = new JsonRpcProvider(url);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await provider.getBalance(address);
+      } catch (e) {
+        lastErr = e;
+        if (isRateLimitedEthError(e)) {
+          await sleep(600 * (attempt + 1) + Math.floor(Math.random() * 200));
+          continue;
+        }
+        break;
+      }
+    }
+  }
+  throw lastErr ?? new Error("ETH balance: all RPC endpoints failed");
+}
+
+function shortenEthFetchError(e) {
+  if (isRateLimitedEthError(e)) {
+    return "ETH RPC rate-limited. Wait a bit, click Refresh, or set VITE_ETH_RPC_URL to your own endpoint (see Mining page note).";
+  }
+  const m = String(e?.message || e || "ETH fetch failed");
+  return m.length > 220 ? `${m.slice(0, 217)}…` : m;
+}
 
 let eccInited = false;
 function initEccOnce() {
@@ -51,6 +108,23 @@ function fmtBal(k, v) {
   return String(v);
 }
 
+function MnemonicGrid({ phrase }) {
+  const words = phrase.trim().split(/\s+/).filter(Boolean);
+  return (
+    <ol className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 list-none m-0 p-0">
+      {words.map((word, i) => (
+        <li
+          key={`${i}-${word}`}
+          className="rounded-md border border-[#2a2a30] bg-[#0d0d0f]/60 px-2 py-1.5 text-xs font-mono text-slate-300"
+        >
+          <span className="text-slate-500 mr-1.5 tabular-nums">{i + 1}.</span>
+          {word}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 export default function MiningPage() {
   const setView = useChatStore((s) => s.setView);
   const apiBase = useChatStore((s) => s.apiBase) || "";
@@ -59,14 +133,13 @@ export default function MiningPage() {
   const [addresses, setAddresses] = useState(null);
   const [balances, setBalances] = useState({});
   const [balanceErrors, setBalanceErrors] = useState({});
-  const [history, setHistory] = useState([]);
   const [fetching, setFetching] = useState(false);
   const [walletError, setWalletError] = useState(null);
 
   const generateWallet = useCallback(() => {
     setWalletError(null);
     try {
-      const m = bip39.generateMnemonic();
+      const m = bip39.generateMnemonic(128);
       const seed = bip39.mnemonicToSeedSync(m);
 
       const ethWallet = HDNodeWallet.fromSeed(new Uint8Array(seed)).derivePath("m/44'/60'/0'/0/0");
@@ -86,12 +159,14 @@ export default function MiningPage() {
       setMnemonic(m);
       setAddresses({
         evm: ethWallet.address,
+        evmPrivateKey: ethWallet.privateKey,
         btc: btcAddress,
+        btcPrivateKeyWif: btcChild.toWIF(),
         sol: solKeypair.publicKey.toBase58(),
+        solSecretKeyBase58: bs58.encode(solKeypair.secretKey),
       });
       setBalances({});
       setBalanceErrors({});
-      setHistory([]);
     } catch (e) {
       setWalletError(e?.message || "Wallet generation failed");
       setMnemonic("");
@@ -106,10 +181,10 @@ export default function MiningPage() {
     const errs = {};
 
     try {
-      const eth = await provider.getBalance(addresses.evm);
+      const eth = await getEthBalanceWei(addresses.evm);
       next.ETH = Number(formatEther(eth));
     } catch (e) {
-      errs.ETH = e?.message || "ETH fetch failed";
+      errs.ETH = shortenEthFetchError(e);
     }
 
     try {
@@ -135,9 +210,6 @@ export default function MiningPage() {
 
     setBalances(next);
     setBalanceErrors(errs);
-
-    const total = Object.values(next).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
-    setHistory((prev) => [...prev.slice(-40), { t: Date.now(), value: total }]);
     setFetching(false);
   }, [addresses, apiBase]);
 
@@ -145,25 +217,6 @@ export default function MiningPage() {
     if (!addresses) return;
     fetchBalances();
   }, [addresses, fetchBalances]);
-
-  const chartData = useMemo(
-    () =>
-      ["ETH", "BTC", "SOL"].map((name) => ({
-        name,
-        value: Number.isFinite(balances[name]) ? balances[name] : 0,
-      })),
-    [balances]
-  );
-
-  const lineData = useMemo(
-    () =>
-      history.map((row, i) => ({
-        i,
-        value: row.value,
-        label: new Date(row.t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-      })),
-    [history]
-  );
 
   return (
     <main className="flex-1 flex flex-col min-h-0 min-w-0 bg-[#0d0d0f] overflow-y-auto">
@@ -197,18 +250,18 @@ export default function MiningPage() {
         <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/95 space-y-1">
           <p className="font-medium text-amber-200">Prototype — in-browser secrets</p>
           <p className="text-xs text-amber-100/85 leading-relaxed">
-            This page generates a BIP39 mnemonic and derives addresses in your browser. Anything shown here can be read by scripts on this page —{" "}
+            This page generates a BIP39 mnemonic and derives <strong className="text-amber-100">addresses and private keys</strong> in your browser. Anything shown here can be read by scripts on this page —{" "}
             <strong className="text-amber-50 font-semibold">do not use real funds or production seeds.</strong>
           </p>
         </div>
 
         <p className="text-xs text-slate-500 max-w-3xl leading-relaxed">
-          Live balances: ETH via public RPC ({ETH_RPC}), BTC via Blockstream, SOL via this app&apos;s server (
+          Live balances: ETH via rotating public RPCs (with retry on 429). For stable demos, set{" "}
+          <code className="text-slate-500">VITE_ETH_RPC_URL</code> in <code className="text-slate-500">.env</code> before{" "}
+          <code className="text-slate-500">npm run build:renderer</code> (single URL or comma-separated list). BTC via Blockstream; SOL via this app&apos;s server (
           <code className="text-slate-500">/api/mining/sol-balance</code>
-          ) using mainnet-compatible RPC (avoids browser 403 on public Solana endpoints). Configure{" "}
-          <code className="text-slate-500">MINING_SOL_RPC_URL</code> or set <code className="text-slate-500">SOLANA_RPC_URL</code> to mainnet. Charts use raw native units (not USD); the line
-          series is the sum of ETH + BTC + SOL
-          balances for demo tracking only.
+          ) using mainnet-compatible RPC. Configure <code className="text-slate-500">MINING_SOL_RPC_URL</code> or{" "}
+          <code className="text-slate-500">SOLANA_RPC_URL</code> to mainnet. Balances are raw native units (not USD).
         </p>
 
         {walletError && (
@@ -218,24 +271,56 @@ export default function MiningPage() {
         )}
 
         {mnemonic && (
-          <section className="space-y-3 rounded-xl border border-[#2a2a30] bg-[#121214] p-4">
-            <h2 className="text-sm font-semibold text-slate-300">Mnemonic</h2>
-            <p className="text-xs font-mono text-slate-400 break-words whitespace-pre-wrap">{mnemonic}</p>
-            <h2 className="text-sm font-semibold text-slate-300 pt-2">Addresses</h2>
-            <ul className="text-xs font-mono text-slate-400 space-y-1 break-all">
-              <li>
-                <span className="text-slate-500">EVM </span>
-                {addresses?.evm}
-              </li>
-              <li>
-                <span className="text-slate-500">BTC </span>
-                {addresses?.btc}
-              </li>
-              <li>
-                <span className="text-slate-500">SOL </span>
-                {addresses?.sol}
-              </li>
-            </ul>
+          <section className="space-y-4 rounded-xl border border-[#2a2a30] bg-[#121214] p-4">
+            <div className="space-y-2">
+              <h2 className="text-sm font-semibold text-slate-300">12-word recovery phrase</h2>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                All EVM, BTC, and SOL keys below are derived from this BIP39 passphrase. Import this phrase (not the individual private keys) into wallets that support standard derivation paths.
+              </p>
+              <MnemonicGrid phrase={mnemonic} />
+              <p className="text-[11px] font-mono text-slate-500 break-words">{mnemonic}</p>
+            </div>
+            <div className="space-y-2 pt-2 border-t border-[#2a2a30]">
+              <h2 className="text-sm font-semibold text-slate-300">Derived addresses &amp; private keys</h2>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              EVM: secp256k1 private key hex (same encoding as MetaMask export). BTC: WIF compressed (mainnet). SOL: base58-encoded 64-byte secret key (Phantom &quot;import private key&quot; style).
+            </p>
+            <div className="mt-3 space-y-4 text-xs font-mono text-slate-400">
+              <div className="rounded-lg border border-[#2a2a30] bg-[#0d0d0f]/60 p-3 space-y-1.5">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">EVM (Ethereum / BIP44 m/44&apos;/60&apos;/0&apos;/0/0)</div>
+                <div>
+                  <span className="text-slate-500">Public </span>
+                  <span className="break-all text-slate-300">{addresses?.evm}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500">Private </span>
+                  <span className="break-all text-amber-200/90">{addresses?.evmPrivateKey}</span>
+                </div>
+              </div>
+              <div className="rounded-lg border border-[#2a2a30] bg-[#0d0d0f]/60 p-3 space-y-1.5">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">BTC (Native SegWit m/84&apos;/0&apos;/0&apos;/0/0)</div>
+                <div>
+                  <span className="text-slate-500">Public </span>
+                  <span className="break-all text-slate-300">{addresses?.btc}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500">Private (WIF) </span>
+                  <span className="break-all text-amber-200/90">{addresses?.btcPrivateKeyWif}</span>
+                </div>
+              </div>
+              <div className="rounded-lg border border-[#2a2a30] bg-[#0d0d0f]/60 p-3 space-y-1.5">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">SOL (ed25519 from BIP39 seed)</div>
+                <div>
+                  <span className="text-slate-500">Public </span>
+                  <span className="break-all text-slate-300">{addresses?.sol}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500">Private (base58) </span>
+                  <span className="break-all text-amber-200/90">{addresses?.solSecretKeyBase58}</span>
+                </div>
+              </div>
+            </div>
+            </div>
           </section>
         )}
 
@@ -252,51 +337,6 @@ export default function MiningPage() {
             ))}
           </ul>
         </section>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <section className="rounded-xl border border-[#2a2a30] bg-[#121214] p-3 min-h-[300px]">
-            <h2 className="text-sm font-medium text-slate-300 mb-2">Allocation (native units)</h2>
-            {chartData.every((d) => d.value === 0) ? (
-              <p className="text-xs text-slate-500 py-8">No non-zero balances yet — generate a wallet with activity, or press Refresh now.</p>
-            ) : (
-              <ResponsiveContainer width="100%" height={280}>
-                <PieChart>
-                  <Pie data={chartData} dataKey="value" nameKey="name" outerRadius={100} stroke="#1e1e24" strokeWidth={1}>
-                    {chartData.map((_, i) => (
-                      <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(v) => [Number(v).toLocaleString(undefined, { maximumFractionDigits: 8 }), ""]}
-                    contentStyle={{ backgroundColor: "#0d0d0f", border: "1px solid #2a2a30", borderRadius: 10 }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 12, color: "#94a3b8" }} />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </section>
-
-          <section className="rounded-xl border border-[#2a2a30] bg-[#121214] p-3 min-h-[300px]">
-            <h2 className="text-sm font-medium text-slate-300 mb-2">Portfolio history (sum of native balances)</h2>
-            {lineData.length === 0 ? (
-              <p className="text-xs text-slate-500 py-8">History appears after the first balance fetch.</p>
-            ) : (
-              <ResponsiveContainer width="100%" height={280}>
-                <LineChart data={lineData}>
-                  <CartesianGrid stroke="#1e1e24" strokeDasharray="3 3" />
-                  <XAxis dataKey="i" hide />
-                  <YAxis tick={{ fill: "#64748b", fontSize: 10 }} tickFormatter={(v) => Number(v).toFixed(4)} />
-                  <Tooltip
-                    labelFormatter={(_, p) => (p?.[0]?.payload?.label ? String(p[0].payload.label) : "")}
-                    formatter={(v) => [Number(v).toFixed(6), "sum"]}
-                    contentStyle={{ backgroundColor: "#0d0d0f", border: "1px solid #2a2a30", borderRadius: 10 }}
-                  />
-                  <Line type="monotone" dataKey="value" name="Σ native" stroke="#a78bfa" strokeWidth={1.8} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </section>
-        </div>
       </div>
     </main>
   );

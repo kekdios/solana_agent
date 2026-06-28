@@ -5,6 +5,7 @@ export const DEFAULT_HEARTBEAT_USER_PROMPT =
   "[Heartbeat] Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.";
 
 export const SLASH_HELP = `Slash commands:
+• /new – Start a fresh chat (clears this view; same as sidebar New chat).
 • /save – Save the current session with an automatic timestamp.
 • /history – Show saved conversations and let you load a previous one.
 • /help – Show this help text.`;
@@ -48,7 +49,7 @@ export const useChatStore = create((set, get) => ({
   usageTotal: null,
   /** Session token total (current app session only). */
   sessionTokenTotal: 0,
-  /** Main content view: "chat" | "quickStart" | "wallet" | "trading" | "mining" | "trend" | "nostr" | "allMessages" | "nanogpt". */
+  /** Main content view: "chat" | "quickStart" | "wallet" | "trading" | "mining" | "liquidity" | "nostr" | … */
   view: "chat",
   /** Solana network from config: "testnet" | "devnet" | "mainnet". */
   solanaNetwork: "testnet",
@@ -108,8 +109,8 @@ export const useChatStore = create((set, get) => ({
           ? "trading"
           : view === "mining"
           ? "mining"
-          : view === "trend"
-          ? "trend"
+          : view === "liquidity" || view === "trend"
+          ? "liquidity"
           : view === "nostr"
           ? "nostr"
           : view === "allMessages"
@@ -164,6 +165,28 @@ export const useChatStore = create((set, get) => ({
     const { apiBase, messages, currentConversationId, sovereignTx: prevSov, latestSwapState } = get();
     const base = apiBase || "";
     const conversationId = currentConversationId;
+    const trimmed = typeof content === "string" ? content.trim() : "";
+    /** Do not call the LLM — matches sidebar "New chat" and avoids empty model replies for /new. */
+    if (trimmed === "/new") {
+      if (base) fetch(`${base}/api/jupiter/swap/clear-expired`, { method: "POST" }).catch(() => {});
+      saveLastConversationId(null);
+      set({
+        currentConversationId: null,
+        messages: [
+          { role: "user", content: "/new" },
+          {
+            role: "assistant",
+            content: "Started a new chat. Previous messages are cleared from this view; older conversations remain in the sidebar.",
+          },
+        ],
+        error: null,
+        sessionTokenTotal: 0,
+        loading: false,
+        currentRequestController: null,
+        latestSwapState: { executing: false, executed: false, error: null, signature: null },
+      });
+      return;
+    }
     const history = messages.map((m) => ({ role: m.role, content: m.content || "" }));
     const newMessages = [...history, { role: "user", content }];
     const controller = new AbortController();
@@ -189,6 +212,10 @@ export const useChatStore = create((set, get) => ({
       }
       let assistantContent = data.choices?.[0]?.message?.content ?? "";
       const toolResults = data.tool_results || [];
+      if (!String(assistantContent).trim() && toolResults.length === 0) {
+        assistantContent =
+          "The model returned an empty reply. Try sending your message again, or click **Stop** if the request seems stuck. If this persists, check Settings (API key, provider) and server logs.";
+      }
       const sovereignResult = toolResults.find((tr) => tr.tool === "sovereign_transaction")?.result || null;
       if (toolResults.length > 0) {
         const toolResultsText = toolResults

@@ -116,9 +116,9 @@ tools:
     handler: getBtcPriceUsd
     enabled: true
 
-  - name: trend_snapshot_read
+  - name: liquidity_regime_read
     description: |
-      Read the latest **Trend dashboard** snapshot (workspace `memory/trend-latest.json`). The file is written whenever the user opens the in-app **Trend** page and data loads (or **Refresh**). Contains rule-based market_state, BTC/ETH/SOL prices vs anchored VWAP, breadth, ratios, and **social_comment_bullets** for drafting a short social/Nostr comment. Not a live trading signal—use for analysis and copy, then **nostr_action** publish if the user wants to post.
+      Read the latest **BTC Liquidity Regime** snapshot (`workspace/memory/btc-liquidity-latest.json`). Written when the user opens **Liquidity** in the app (or Refresh). Contains regime (FLUID/WATCH/STRESSED), stablecoin deltas, HL BTC funding, ETF volume proxy, warnings, and **watch_bullets**. Watch-mode only — not a trading signal.
     enabled: true
 
   - name: workspace_read
@@ -303,15 +303,18 @@ tools:
 
   - name: nostr_action
     description: |
-      Unified Nostr action gateway (single entry point). Pass:
-      { "type": "...", "payload": { ... } } with strict per-type payloads.
+      You HAVE this tool — the only Nostr integration. Name it **nostr_action** exactly in explanations.
+      Unified gateway: `{ "type": "...", "payload": { ... } }`.
+      **Signing:** uses **NOSTR_NSEC** (and relays) configured **on this server** (Settings / env).
+      Do **not** tell the user to paste an nsec into chat for normal posting; if NOSTR_NSEC is missing,
+      say signing is not configured and point to Settings.
       Types:
-      - publish: payload { content }
+      - publish: payload { content } — needs tier ≥2 when publishing
       - read (feed/default): payload { mode?: "feed", scope: "feed|public_feed|communities|health|public_health", limit?, ai_only?, topic_labels? }
       - read (specific post): payload { mode: "by_id", event_id }
       - reply: payload { content, parent_event_id, parent_pubkey? }
       - react: payload { event_id, event_pubkey?, reaction? }
       - profile: payload { profile }
-      Website payment-intent flows are removed; signing uses NOSTR_NSEC and direct relays.
+      Website payment-intent flows are removed; direct relays only.
     enabled: true
 

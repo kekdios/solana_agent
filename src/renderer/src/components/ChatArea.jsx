@@ -377,7 +377,7 @@ export default function ChatArea() {
     e.preventDefault();
     const text = input.trim();
     if (!text || loading) return;
-    if (text === "/save" || text === "/history" || text === "/help") {
+    if (text === "/new" || text === "/save" || text === "/history" || text === "/help") {
       sendMessage(text);
       setInput("");
       return;
@@ -464,7 +464,7 @@ export default function ChatArea() {
         <div className="flex-1 overflow-y-auto px-6 pt-6 pb-4 space-y-4">
           {messages.length === 0 && (
             <div className="text-center text-slate-500 py-12">
-              <p className="text-sm">Send a message or use /save, /history, /help</p>
+              <p className="text-sm">Send a message or use /new, /save, /history, /help</p>
             </div>
           )}
           {messages.map((m, i) => (
@@ -571,7 +571,7 @@ export default function ChatArea() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Message… (Shift+Enter for new line) (/save, /history, /help)"
+              placeholder="Message… (Shift+Enter for new line) (/new, /save, /history, /help)"
               rows={1}
               className="w-full min-h-[42px] max-h-32 resize-y rounded-xl bg-[#1a1a1e] border border-[#2a2a30] px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 text-sm"
               disabled={loading}
