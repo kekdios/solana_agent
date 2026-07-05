@@ -1,8 +1,10 @@
 {
   "schema_version": 1,
-  "server_received_at": "2026-06-28T00:50:30.031Z",
+  "server_received_at": "2026-06-30T17:22:14.706Z",
   "ok": true,
-  "updated_at": "2026-06-28T00:50:30.031Z",
+  "updated_at": "2026-06-30T17:22:14.706Z",
+  "btc_price_usd": 58379,
+  "btc_price_source": "coingecko",
   "regime": "STRESSED",
   "warnings": [
     "stablecoin_7d_negative",
@@ -10,38 +12,26 @@
   ],
   "stablecoins": {
     "ok": true,
-    "total_usd": 258764469280.07886,
-    "usdt_usd": 184903410053.36243,
-    "usdc_usd": 73861059226.71645,
+    "total_usd": 258252357554.32336,
+    "usdt_usd": 184647757585.5062,
+    "usdc_usd": 73604599968.81717,
     "delta_7d": {
-      "absolute": -2343810000.4799805,
-      "pct": -0.8975978061895669
+      "absolute": -2101486131.8200073,
+      "pct": -0.8063158762727861
     },
     "delta_30d": {
-      "absolute": -6816765662.47998,
-      "pct": -2.5666186007664775
+      "absolute": -5523395281.820007,
+      "pct": -2.0917985591895953
     },
     "usdt_delta_7d": {
-      "absolute": -1275929080.119995,
-      "pct": -0.6853225959738007
+      "absolute": -1448536323.5599976,
+      "pct": -0.7783920517598557
     },
     "usdc_delta_7d": {
-      "absolute": -1067880920.3600006,
-      "pct": -1.4249631191158685
+      "absolute": -652949808.2599945,
+      "pct": -0.8760342389487712
     },
     "sparkline_90d": [
-      {
-        "day": "2026-03-30",
-        "value": 261608629755
-      },
-      {
-        "day": "2026-03-31",
-        "value": 261387802883
-      },
-      {
-        "day": "2026-04-01",
-        "value": 261285757469
-      },
       {
         "day": "2026-04-02",
         "value": 261295609144
@@ -388,7 +378,19 @@
       },
       {
         "day": "2026-06-27",
-        "value": 258776480659.52002
+        "value": 258776480660
+      },
+      {
+        "day": "2026-06-28",
+        "value": 258737349188
+      },
+      {
+        "day": "2026-06-29",
+        "value": 258689361831
+      },
+      {
+        "day": "2026-06-30",
+        "value": 258526661429.18
       }
     ],
     "source": "defillama"
@@ -398,64 +400,64 @@
     "venue": "hyperliquid",
     "coin": "BTC",
     "rate_period": "hourly",
-    "rate_hourly": -0.0000070389,
-    "rate_8h_equiv": -0.0000563112,
-    "vs_30d_mean": 0.000006194093599999986,
-    "vs_30d_z": -1.698170089724943,
+    "rate_hourly": 0.0000125,
+    "rate_8h_equiv": 0.0001,
+    "vs_30d_mean": 0.000008258241799999986,
+    "vs_30d_z": 0.7538715611957977,
     "vs_30d_p75": 0.0000125,
     "rising_3": false,
     "falling_3": false,
-    "open_interest_btc": 33724.21792,
-    "open_interest_usd": 2027365084.4787202,
-    "mark_px_usd": 60116,
+    "open_interest_btc": 35777.92098,
+    "open_interest_usd": 2089394807.3110201,
+    "mark_px_usd": 58399,
     "sparkline_90d": [
       {
         "idx": 0,
-        "value": -6.009e-7
+        "value": 0.0000125
       },
       {
         "idx": 1,
-        "value": -6.14e-8
+        "value": 0.0000125
       },
       {
         "idx": 2,
-        "value": 0.0000086005
+        "value": 0.0000125
       },
       {
         "idx": 3,
-        "value": -0.0000019732
+        "value": 0.0000125
       },
       {
         "idx": 4,
-        "value": -0.0000028166
+        "value": 0.0000125
       },
       {
         "idx": 5,
-        "value": -0.0000018565
+        "value": 0.0000125
       },
       {
         "idx": 6,
-        "value": -0.0000052185
+        "value": 0.0000125
       },
       {
         "idx": 7,
-        "value": 0.0000022075
+        "value": 0.0000125
       },
       {
         "idx": 8,
-        "value": 0.0000056886
+        "value": 0.0000125
       },
       {
         "idx": 9,
-        "value": 0.0000020827
+        "value": 0.0000125
       },
       {
         "idx": 10,
-        "value": 0.0000099992
+        "value": 0.0000125
       },
       {
         "idx": 11,
-        "value": 0.0000117385
+        "value": 0.0000125
       },
       {
         "idx": 12,
@@ -467,15 +469,15 @@
       },
       {
         "idx": 14,
-        "value": 0.0000038595
+        "value": 0.0000125
       },
       {
         "idx": 15,
-        "value": 0.0000107976
+        "value": 0.0000111048
       },
       {
         "idx": 16,
-        "value": 0.0000115958
+        "value": 0.0000125
       },
       {
         "idx": 17,
@@ -487,15 +489,15 @@
       },
       {
         "idx": 19,
-        "value": 0.0000075043
+        "value": 0.0000125
       },
       {
         "idx": 20,
-        "value": 0.0000067179
+        "value": 0.0000125
       },
       {
         "idx": 21,
-        "value": 0.0000087489
+        "value": 0.0000125
       },
       {
         "idx": 22,
@@ -507,67 +509,67 @@
       },
       {
         "idx": 24,
-        "value": 0.0000028632
+        "value": 0.0000125
       },
       {
         "idx": 25,
-        "value": 0.0000097258
+        "value": 0.0000125
       },
       {
         "idx": 26,
-        "value": 0.0000042621
+        "value": 0.0000125
       },
       {
         "idx": 27,
-        "value": 0.0000039427
+        "value": 0.0000125
       },
       {
         "idx": 28,
-        "value": -8.784e-7
+        "value": 0.0000125
       },
       {
         "idx": 29,
-        "value": 9.61e-7
+        "value": 0.0000125
       },
       {
         "idx": 30,
-        "value": 0.0000035615
+        "value": 0.0000125
       },
       {
         "idx": 31,
-        "value": 0.0000025228
+        "value": 0.0000125
       },
       {
         "idx": 32,
-        "value": 0.0000074415
+        "value": 0.0000125
       },
       {
         "idx": 33,
-        "value": 0.0000049882
+        "value": 0.0000125
       },
       {
         "idx": 34,
-        "value": 0.0000022406
+        "value": 0.0000094642
       },
       {
         "idx": 35,
-        "value": 0.0000029413
+        "value": 0.0000125
       },
       {
         "idx": 36,
-        "value": 0.0000010337
+        "value": 0.0000125
       },
       {
         "idx": 37,
-        "value": -0.000003225
+        "value": 0.0000125
       },
       {
         "idx": 38,
-        "value": 1.041e-7
+        "value": 0.0000125
       },
       {
         "idx": 39,
-        "value": 0.0000058942
+        "value": 0.0000125
       },
       {
         "idx": 40,
@@ -575,15 +577,15 @@
       },
       {
         "idx": 41,
-        "value": 0.0000125
+        "value": 0.0000071674
       },
       {
         "idx": 42,
-        "value": 0.0000029344
+        "value": 0.0000077257
       },
       {
         "idx": 43,
-        "value": 0.0000107886
+        "value": 0.0000125
       },
       {
         "idx": 44,
@@ -595,7 +597,7 @@
       },
       {
         "idx": 46,
-        "value": 0.0000125
+        "value": 0.0000038956
       },
       {
         "idx": 47,
@@ -607,7 +609,7 @@
       },
       {
         "idx": 49,
-        "value": 0.0000086902
+        "value": 0.0000125
       },
       {
         "idx": 50,
@@ -615,43 +617,43 @@
       },
       {
         "idx": 51,
-        "value": 0.0000101694
+        "value": 0.0000125
       },
       {
         "idx": 52,
-        "value": 7.118e-7
+        "value": 0.0000125
       },
       {
         "idx": 53,
-        "value": 0.0000023719
+        "value": 0.0000088257
       },
       {
         "idx": 54,
-        "value": 7.86e-8
+        "value": 0.0000125
       },
       {
         "idx": 55,
-        "value": 0.000005032
+        "value": 0.0000125
       },
       {
         "idx": 56,
-        "value": -8.93e-8
+        "value": 0.0000125
       },
       {
         "idx": 57,
-        "value": 0.0000060707
+        "value": 0.000008218
       },
       {
         "idx": 58,
-        "value": -0.0000061507
+        "value": 0.0000125
       },
       {
         "idx": 59,
-        "value": 0.0000037445
+        "value": 0.0000125
       },
       {
         "idx": 60,
-        "value": 0.0000078066
+        "value": 0.0000125
       },
       {
         "idx": 61,
@@ -679,79 +681,79 @@
       },
       {
         "idx": 67,
-        "value": 0.0000125
+        "value": 0.0000090404
       },
       {
         "idx": 68,
-        "value": 0.0000125
+        "value": 8.274e-7
       },
       {
         "idx": 69,
-        "value": 0.0000125
+        "value": 0.0000042773
       },
       {
         "idx": 70,
-        "value": 0.0000125
+        "value": 0.0000074966
       },
       {
         "idx": 71,
-        "value": 0.0000125
+        "value": 0.0000089755
       },
       {
         "idx": 72,
-        "value": 0.0000125
+        "value": -8.788e-7
       },
       {
         "idx": 73,
-        "value": 0.0000125
+        "value": -4.623e-7
       },
       {
         "idx": 74,
-        "value": 0.0000125
+        "value": -0.0000018889
       },
       {
         "idx": 75,
-        "value": 0.0000125
+        "value": 0.0000014923
       },
       {
         "idx": 76,
-        "value": 0.0000125
+        "value": 0.0000032685
       },
       {
         "idx": 77,
-        "value": 0.0000125
+        "value": 0.0000049604
       },
       {
         "idx": 78,
-        "value": 0.0000125
+        "value": 0.0000021925
       },
       {
         "idx": 79,
-        "value": 0.0000125
+        "value": -0.0000052574
       },
       {
         "idx": 80,
-        "value": 0.0000111048
+        "value": -4.813e-7
       },
       {
         "idx": 81,
-        "value": 0.0000125
+        "value": 0.0000011295
       },
       {
         "idx": 82,
-        "value": 0.0000125
+        "value": 0.0000054219
       },
       {
         "idx": 83,
-        "value": 0.0000125
+        "value": 0.0000071253
       },
       {
         "idx": 84,
-        "value": 0.0000125
+        "value": 0.0000010194
       },
       {
         "idx": 85,
-        "value": 0.0000125
+        "value": 0.0000092768
       },
       {
         "idx": 86,
@@ -759,15 +761,15 @@
       },
       {
         "idx": 87,
-        "value": 0.0000125
+        "value": 0.0000119506
       },
       {
         "idx": 88,
-        "value": 0.0000125
+        "value": 0.0000058353
       },
       {
         "idx": 89,
-        "value": 0.0000125
+        "value": 0.000008488
       }
     ],
     "history_points": 500,
@@ -780,18 +782,10 @@
       "IBIT": {
         "ok": true,
         "symbol": "IBIT",
-        "volume_vs_20d": 1.0957059079665366,
-        "last_volume": 59134700,
-        "day_change_pct": 0.9844809422757332,
+        "volume_vs_20d": 0.7301234975771594,
+        "last_volume": 40310111,
+        "day_change_pct": -3.3499135387377033,
         "sparkline_30d": [
-          {
-            "day": "2026-05-14",
-            "volume": 44670300
-          },
-          {
-            "day": "2026-05-15",
-            "volume": 39817900
-          },
           {
             "day": "2026-05-18",
             "volume": 55893800
@@ -902,7 +896,15 @@
           },
           {
             "day": "2026-06-26",
-            "volume": 59134700
+            "volume": 59375800
+          },
+          {
+            "day": "2026-06-29",
+            "volume": 48119300
+          },
+          {
+            "day": "2026-06-30",
+            "volume": 40310111
           }
         ],
         "source": "yahoo_volume_proxy"
@@ -910,18 +912,10 @@
       "FBTC": {
         "ok": true,
         "symbol": "FBTC",
-        "volume_vs_20d": 0.8040773228905729,
-        "last_volume": 4222600,
-        "day_change_pct": 0.9908651825095802,
+        "volume_vs_20d": 0.6758073126916542,
+        "last_volume": 3607723,
+        "day_change_pct": -3.345580990663507,
         "sparkline_30d": [
-          {
-            "day": "2026-05-14",
-            "volume": 4073900
-          },
-          {
-            "day": "2026-05-15",
-            "volume": 3599200
-          },
           {
             "day": "2026-05-18",
             "volume": 4326400
@@ -1032,26 +1026,34 @@
           },
           {
             "day": "2026-06-26",
-            "volume": 4222600
+            "volume": 4226600
+          },
+          {
+            "day": "2026-06-29",
+            "volume": 3877300
+          },
+          {
+            "day": "2026-06-30",
+            "volume": 3607723
           }
         ],
         "source": "yahoo_volume_proxy"
       }
     },
-    "avg_volume_vs_20d": 0.9498916154285547,
-    "max_volume_vs_20d": 1.0957059079665366,
-    "ibit_day_change_pct": 0.9844809422757332,
-    "fbtc_day_change_pct": 0.9908651825095802,
-    "down_day_count": 0,
+    "avg_volume_vs_20d": 0.7029654051344068,
+    "max_volume_vs_20d": 0.7301234975771594,
+    "ibit_day_change_pct": -3.3499135387377033,
+    "fbtc_day_change_pct": -3.345580990663507,
+    "down_day_count": 2,
     "symbol_count_ok": 2,
     "source": "yahoo_volume_proxy",
     "note": "IBIT/FBTC share volume vs 20d SMA — not official ETF flow. Spot pipe (IBIT), not income products (e.g. BITA)."
   },
   "watch_bullets": [
     "Regime (watch-mode, not a forecast): STRESSED.",
-    "Stables (USDT+USDC): $258.76B total; 7d Δ -2.34B (-0.90%).",
-    "HL BTC funding -0.0007%/hr (z -1.70; HL only).",
-    "ETF vol proxy: max 1.10× 20d SMA; IBIT day 0.98% (volume proxy, not flow).",
+    "Stables (USDT+USDC): $258.25B total; 7d Δ -2.10B (-0.81%).",
+    "HL BTC funding 0.0013%/hr (z 0.75; HL only).",
+    "ETF vol proxy: max 0.73× 20d SMA; IBIT day -3.35% (volume proxy, not flow).",
     "Warnings: stablecoin_7d_negative, stablecoin_30d_decline.",
     "Headlines move price when they hit levered books; this snapshot is plumbing/positioning only."
   ],
